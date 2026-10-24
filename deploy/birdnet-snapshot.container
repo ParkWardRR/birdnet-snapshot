@@ -1,0 +1,21 @@
+# Podman quadlet: ~/.config/containers/systemd/birdnet-snapshot.container
+#   systemctl --user daemon-reload && systemctl --user start birdnet-snapshot
+[Unit]
+Description=Hourly read-only BirdNET-Go snapshot
+After=network-online.target
+
+[Container]
+Image=ghcr.io/parkwardrr/birdnet-snapshot:latest
+EnvironmentFile=%h/.config/birdnet-snapshot/env
+Environment=SNAPSHOT_EVERY=1h
+# Host network so BIRDNET_URL=http://127.0.0.1:8080 reaches BirdNET-Go on this host.
+Network=host
+ShmSize=1g
+Volume=birdnet-snapshot:/data
+Exec=run
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

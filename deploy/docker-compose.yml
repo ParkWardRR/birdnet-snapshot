@@ -1,0 +1,16 @@
+# Runs a snapshot every hour next to BirdNET-Go. Chrome is bundled.
+services:
+  birdnet-snapshot:
+    image: ghcr.io/parkwardrr/birdnet-snapshot:latest
+    restart: unless-stopped
+    shm_size: 1g
+    env_file: .env            # copy env.example to .env and fill it in
+    environment:
+      BIRDNET_URL: http://birdnet-go:8080   # or the host's LAN address
+      SNAPSHOT_EVERY: 1h
+    volumes:
+      - snapshot:/data
+    command: ["run"]
+
+volumes:
+  snapshot:

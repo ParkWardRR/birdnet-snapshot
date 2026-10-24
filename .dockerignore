@@ -1,0 +1,7 @@
+.git
+.github
+site
+site.tmp
+dist
+*.prom
+docs/images

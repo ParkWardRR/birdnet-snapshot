@@ -1,0 +1,10 @@
+[Unit]
+Description=Hourly BirdNET-Go snapshot
+
+[Timer]
+OnCalendar=*-*-* *:07
+Persistent=true
+RandomizedDelaySec=2m
+
+[Install]
+WantedBy=timers.target

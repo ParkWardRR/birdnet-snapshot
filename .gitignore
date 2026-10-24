@@ -1,0 +1,8 @@
+/site/
+/site.tmp/
+/dist/
+/build/
+*.prom
+coverage.out
+/birdnet-snapshot
+.DS_Store

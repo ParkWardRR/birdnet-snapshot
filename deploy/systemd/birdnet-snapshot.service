@@ -1,0 +1,23 @@
+# User unit: ~/.config/systemd/user/birdnet-snapshot.service
+# Runs one crawl + deploy. Chrome runs from the bundled-Chrome image so the
+# host needs nothing but podman; DevTools stays on 127.0.0.1.
+#
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now birdnet-snapshot.timer
+#   loginctl enable-linger $USER    # keep user timers running after logout
+[Unit]
+Description=Publish a read-only BirdNET-Go snapshot
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/birdnet-snapshot/env
+ExecStartPre=-/usr/bin/podman rm -f bns-chrome
+ExecStartPre=/usr/bin/podman run -d --rm --name bns-chrome --network host --shm-size 1g --log-driver none \
+  --entrypoint /headless-shell/headless-shell docker.io/chromedp/headless-shell:157.0.8103.15 \
+  --no-sandbox --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222
+ExecStartPre=/bin/sh -c 'for i in $(seq 30); do curl -sf http://127.0.0.1:9222/json/version >/dev/null && exit 0; sleep 1; done; exit 1'
+ExecStart=%h/.local/bin/birdnet-snapshot run -chrome http://127.0.0.1:9222 -out %h/.cache/birdnet-snapshot/site
+ExecStopPost=/usr/bin/podman rm -f bns-chrome
+TimeoutStartSec=40min
+Nice=10

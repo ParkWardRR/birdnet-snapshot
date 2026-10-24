@@ -1,0 +1,277 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+// detection is the part of a detection record needed to decide on its clip.
+type detection struct {
+	ID       int64
+	ClipName string
+	Source   string // source id + display name, lowercased
+}
+
+// fetchClips downloads the audio clip of every detection the crawl saw, since
+// the UI only requests a clip when the visitor presses play. Clips from
+// sources in c.SkipAudio (say, a doorbell mic that hears people) are never
+// fetched, and none are with c.NoAudio.
+func fetchClips(ctx context.Context, c config, st *store) error {
+	dets := st.detections()
+	if err := fetchDetails(ctx, c, st, dets); err != nil {
+		return err
+	}
+	if err := retryMedia(ctx, c, st); err != nil {
+		return err
+	}
+	purgeAudio(c, st, st.detections())
+
+	ids := make([]int64, 0, len(dets))
+	skipped := 0
+	for id, d := range dets {
+		if c.NoAudio || d.ClipName == "" || skipSource(d.Source, c.SkipAudio) {
+			skipped++
+			continue
+		}
+		ids = append(ids, id)
+	}
+	// Newest (highest id) first, so the budget keeps the recent clips.
+	sort.Slice(ids, func(i, j int) bool { return ids[i] > ids[j] })
+	if len(ids) > c.MaxClips {
+		ids = ids[:c.MaxClips]
+	}
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	var (
+		wg      sync.WaitGroup
+		sem     = make(chan struct{}, 4)
+		mu      sync.Mutex
+		fetched int
+		failed  int
+	)
+	for _, id := range ids {
+		k := fmt.Sprintf("/api/v2/audio/%d", id)
+		if st.has(k) {
+			continue
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			body, mime, err := get(ctx, client, c.BirdNET+k)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				failed++
+				return
+			}
+			fetched++
+			st.put(&capture{Key: k, MIME: mime, Body: body})
+		}()
+	}
+	wg.Wait()
+	log.Printf("clips: %d detections, %d fetched, %d failed, %d skipped (no clip or private source)",
+		len(dets), fetched, failed, skipped)
+	return ctx.Err()
+}
+
+// purgeAudio removes clips the browser recorded during the crawl (a page that
+// preloads audio) that must not be published: every clip with c.NoAudio, and
+// otherwise clips whose detection is from a skipped or unknown source.
+func purgeAudio(c config, st *store, dets map[int64]detection) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	removed := 0
+	for k := range st.items {
+		p, _, _ := strings.Cut(k, "?")
+		idStr, ok := strings.CutPrefix(p, "/api/v2/audio/")
+		if !ok {
+			continue
+		}
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		d, known := dets[id]
+		if c.NoAudio || err != nil || !known || skipSource(d.Source, c.SkipAudio) {
+			delete(st.items, k)
+			removed++
+		}
+	}
+	if removed > 0 {
+		log.Printf("clips: dropped %d recorded clip(s) from skipped or unknown sources", removed)
+	}
+}
+
+// fetchDetails fills in the detail-page API URLs (st.templates) for every
+// detection, newest first, so clicking any recorded detection works.
+func fetchDetails(ctx context.Context, c config, st *store, dets map[int64]detection) error {
+	if len(st.templates) == 0 {
+		return nil
+	}
+	ids := make([]int64, 0, len(dets))
+	for id := range dets {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] > ids[j] })
+	if len(ids) > c.MaxClips {
+		ids = ids[:c.MaxClips]
+	}
+	client := &http.Client{Timeout: 60 * time.Second}
+	var (
+		wg              sync.WaitGroup
+		sem             = make(chan struct{}, 4)
+		mu              sync.Mutex
+		fetched, failed int
+	)
+	for _, id := range ids {
+		for _, t := range st.templates {
+			k := strings.ReplaceAll(t, "{id}", fmt.Sprint(id))
+			if st.has(k) {
+				continue
+			}
+			wg.Add(1)
+			sem <- struct{}{}
+			go func() {
+				defer wg.Done()
+				defer func() { <-sem }()
+				body, mime, err := get(ctx, client, c.BirdNET+k)
+				mu.Lock()
+				defer mu.Unlock()
+				if err != nil {
+					failed++
+					return
+				}
+				fetched++
+				st.put(&capture{Key: k, MIME: mime, Body: body})
+			}()
+		}
+	}
+	wg.Wait()
+	log.Printf("details: %d detections × %d templates, %d fetched, %d failed", len(ids), len(st.templates), fetched, failed)
+	return ctx.Err()
+}
+
+func collectDetections(v any, out map[int64]detection) {
+	switch t := v.(type) {
+	case []any:
+		for _, e := range t {
+			collectDetections(e, out)
+		}
+	case map[string]any:
+		if id, ok := t["id"].(float64); ok {
+			if clip, ok := t["clipName"].(string); ok {
+				d := detection{ID: int64(id), ClipName: clip}
+				if src, ok := t["source"].(map[string]any); ok {
+					s1, _ := src["id"].(string)
+					s2, _ := src["displayName"].(string)
+					d.Source = strings.ToLower(s1 + " " + s2)
+				} else if s, ok := t["source"].(string); ok {
+					d.Source = strings.ToLower(s)
+				}
+				out[d.ID] = d
+			}
+		}
+		for _, e := range t {
+			collectDetections(e, out)
+		}
+	}
+}
+
+func skipSource(src string, skip []string) bool {
+	if src == "" {
+		return true // unknown source: don't risk publishing it
+	}
+	for _, s := range skip {
+		if strings.Contains(src, s) {
+			return true
+		}
+	}
+	return false
+}
+
+func get(ctx context.Context, client *http.Client, u string) ([]byte, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, "", fmt.Errorf("%s: status %d", u, resp.StatusCode)
+	}
+	b, err := io.ReadAll(resp.Body)
+	return b, resp.Header.Get("Content-Type"), err
+}
+
+func isJSON(mime string) bool { return strings.Contains(mime, "json") }
+
+var (
+	statusRe = regexp.MustCompile(`^/api/v2/spectrogram/(\d+)/status(\?.*)?$`)
+	mediaRe  = regexp.MustCompile(`^/api/v2/(spectrogram/\d+(\?.*)?|audio/\d+)$`)
+)
+
+// retryMedia fetches spectrograms and clips the UI wanted but did not get
+// during the crawl: images still rendering when a page asked (the UI polls a
+// status endpoint, which the snapshot answers itself from what is recorded),
+// and clips not yet written for brand-new detections. A GET renders a
+// spectrogram on demand.
+func retryMedia(ctx context.Context, c config, st *store) error {
+	want := map[string]bool{}
+	st.mu.Lock()
+	for k := range st.items {
+		if m := statusRe.FindStringSubmatch(k); m != nil {
+			want["/api/v2/spectrogram/"+m[1]+m[2]] = true
+		}
+	}
+	for _, miss := range st.misses {
+		if _, k, ok := strings.Cut(miss, " "); ok && mediaRe.MatchString(k) {
+			want[k] = true
+		}
+	}
+	for k := range want {
+		if _, ok := st.items[k]; ok {
+			delete(want, k)
+		}
+	}
+	st.mu.Unlock()
+	if len(want) == 0 {
+		return nil
+	}
+	client := &http.Client{Timeout: 60 * time.Second}
+	var (
+		wg      sync.WaitGroup
+		sem     = make(chan struct{}, 4)
+		mu      sync.Mutex
+		fetched int
+	)
+	for k := range want {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			body, mime, err := get(ctx, client, c.BirdNET+k)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			fetched++
+			mu.Unlock()
+			st.put(&capture{Key: k, MIME: mime, Body: body})
+		}()
+	}
+	wg.Wait()
+	log.Printf("media: %d of %d missing spectrograms/clips recovered", fetched, len(want))
+	return ctx.Err()
+}
