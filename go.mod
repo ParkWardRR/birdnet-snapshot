@@ -3,12 +3,11 @@ module github.com/ParkWardRR/birdnet-snapshot
 go 1.26
 
 require (
-	github.com/chromedp/cdproto v0.0.0-20260320225252-cf654f46fc63
+	github.com/chromedp/cdproto v0.158.4
 	github.com/chromedp/chromedp v0.15.0
 )
 
 require (
-	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect

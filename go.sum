@@ -1,9 +1,7 @@
-github.com/chromedp/cdproto v0.0.0-20260320225252-cf654f46fc63 h1:f027idvVkILyihTa8Z2vQCxTYPqHNdKlW7cXdMSZegU=
-github.com/chromedp/cdproto v0.0.0-20260320225252-cf654f46fc63/go.mod h1:cbyjALe67vDvlvdiG9369P8w5U2w6IshwtyD2f2Tvag=
+github.com/chromedp/cdproto v0.158.4 h1:5t2VGQGp2OuaGPnKIpBikPplESrGMjQMQ4d+7e+eilk=
+github.com/chromedp/cdproto v0.158.4/go.mod h1:h68JaIuFr9o3yiayxEYhBdvaxgYO3shDrPSYhNlyfu0=
 github.com/chromedp/chromedp v0.15.0 h1:B5abPcaCVetu6GDHsQKj8HbMhDWdiOM52E/TuOfuwyY=
 github.com/chromedp/chromedp v0.15.0/go.mod h1:V5szO2ASqoBZsIQ88EfNMRhi9737Equm5HFL9tsBt3Q=
-github.com/chromedp/sysutil v1.1.0 h1:PUFNv5EcprjqXZD9nJb9b/c9ibAbxiYo4exNWZyipwM=
-github.com/chromedp/sysutil v1.1.0/go.mod h1:WiThHUdltqCNKGc4gaU50XgYjwjYIhKWoHGPTUfWTJ8=
 github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433 h1:vymEbVwYFP/L05h5TKQxvkXoKxNvTpjxYKdF1Nlwuao=
 github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433/go.mod h1:tphK2c80bpPhMOI4v6bIc2xWywPfbqi1Z06+RcrMkDg=
 github.com/gobwas/httphead v0.1.0 h1:exrUm0f4YX0L7EBwZHuCF4GDp8aJfVeBrlLQrs6NqWU=
