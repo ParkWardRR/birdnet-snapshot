@@ -20,6 +20,10 @@ Your server never sees a single visitor.
 [![Platforms](https://img.shields.io/badge/platform-linux_%7C_macOS_%7C_windows-informational?style=flat-square)](#install)
 [![Read-only](https://img.shields.io/badge/visitors-read--only-8B5CF6?style=flat-square)](#privacy-and-safety)
 [![Chrome](https://img.shields.io/badge/headless-Chrome-4285F4?style=flat-square&logo=googlechrome&logoColor=white)](https://github.com/chromedp/chromedp)
+[![Tested in](https://img.shields.io/badge/tested_in-Chromium_%7C_Firefox_%7C_WebKit-2EAD33?style=flat-square&logo=playwright&logoColor=white)](#testing)
+[![CSP](https://img.shields.io/badge/CSP-hash--locked-1F2937?style=flat-square)](#privacy-and-safety)
+[![Location](https://img.shields.io/badge/location-redacted-DC2626?style=flat-square)](#privacy-and-safety)
+[![CI runner](https://img.shields.io/badge/CI-self--hosted_podman-0F766E?style=flat-square&logo=podman&logoColor=white)](#testing)
 
 <br/>
 
@@ -44,10 +48,13 @@ BirdNET-Go is great to share, but its UI has admin controls, live streams and no
 | 🪞 **The real UI** | No reimplementation. BirdNET-Go's own Svelte frontend runs in the visitor's browser; a service worker answers its API calls from the recording |
 | 📊 **Everything a guest sees** | Dashboard for the last 7 days, all analytics pages, species, search, about, up to 150 detection lists, detail pages with large spectrograms and audio clips, and the phone layout |
 | 🔒 **Read-only and offline from your server** | Writes get `403`, live streams are stubbed, settings never load. The CDN serves everything; BirdNET-Go is never reached |
-| 🕵️ **Privacy filters** | Skip clips from sources that hear people (`-skip-audio doorbell`), or publish no audio at all. RTSP URLs (and any credentials in them) are scrubbed. `noindex` + `robots.txt` by default |
+| 🕵️ **Privacy filters** | Station coordinates removed from every response (`-location hide`, or `coarse` for ~100 km), clips from sources that hear people skipped (`-skip-audio doorbell`) or no audio at all, RTSP URLs and their credentials scrubbed, your own `-redact` patterns, `noindex` by default |
+| 🚨 **Leak guard** | `-forbid` patterns (your home domain, LAN range…) are checked against every published file; a match fails the build and nothing is uploaded |
+| 🧱 **Hardened** | Strict Content-Security-Policy with the shell's inline scripts pinned by hash, no third-party requests. `bunny-setup` adds HSTS, nosniff, frame-deny, no-referrer, Permissions-Policy and COOP/CORP, and blocks writes at the edge |
 | 🛡️ **Safe publishing** | A crawl that is clearly broken (server restarting, UI failing) is never published, and a snapshot that shrinks by more than half needs `-force` |
 | ⚡ **Cheap incremental deploys** | Content-addressed files and a checksum diff: an hourly run uploads only what changed. Entry files are swapped last, so visitors never see a half-uploaded site |
-| ☁️ **One-command Bunny setup** | `bunny-setup` creates the storage zone, pull zone, cache rules, custom hostname, DNS record and TLS certificate, and is safe to re-run |
+| ☁️ **One-command Bunny setup** | `bunny-setup` creates the storage zone, pull zone, cache rules, security headers, custom hostname, DNS record and TLS certificate, and is safe to re-run |
+| 🚀 **Fast** | App starts in 0.1–0.4 s on a first visit and ~0.15 s on repeat visits (measured in Chromium and WebKit): Brotli, immutable caching of content-addressed files, the manifest preloaded by the service worker, network work started before the DOM is parsed |
 | 🌍 **Any static host** | Writes `404.html` and `_redirects`, so GitHub Pages, Cloudflare Pages, Netlify, nginx or Caddy work too |
 | 🕐 **Time-correct** | Detects BirdNET-Go's timezone, pins the dashboard to the snapshot's day and the clock to the snapshot's time, so "today" and "5 minutes ago" stay true |
 | 📈 **Monitoring** | Prometheus textfile metrics: last success, duration, pages, entries, clips, bytes, uploads |
@@ -83,10 +90,10 @@ flowchart LR
     V -. "4 · /api/ calls answered<br/>by the service worker" .-> F
 ```
 
-1. **Crawl.** Chrome loads the UI as a guest (the crawler rewrites `app/config` so the UI thinks auth is on and nobody is logged in). It visits the seed pages, follows detection links by priority, learns which API calls a detail page makes, and fetches those directly for every recorded detection, plus clips and spectrograms. Admin, settings, stream and notification endpoints are blocked, and so is every write except "render this spectrogram".
-2. **Build.** Assets keep their paths. API responses go to `/_snap/<sha256>.<ext>`, indexed by a manifest that `snapshot.json` points to. The UI shell gets a boot script that stubs `EventSource`, pins the clock, and starts the app once the service worker controls the page.
+1. **Crawl.** Chrome loads the UI as a guest (the crawler rewrites `app/config` so the UI thinks auth is on and nobody is logged in). It visits the seed pages, follows detection links by priority, and opens two detail pages of different species to learn which API calls a detail page makes, as `{id}` and `{sci}` templates. Those are replayed for every recorded detection, along with clips and spectrograms. Every chunk, stylesheet, sound and icon referenced by the recorded code is fetched too, so rare code paths (error screens, lazy routes) work. Media still being written during the crawl is retried at the end. Admin, settings, stream and notification endpoints are blocked, and so is every write except "render this spectrogram".
+2. **Build.** Responses are scrubbed (coordinates, stream URLs, your `-redact` patterns) and checked against `-forbid`. Assets keep their paths. API responses go to `/_snap/<sha256>.<ext>`, indexed by a manifest that `snapshot.json` points to. The UI shell gets a Content-Security-Policy with its inline scripts pinned by hash, and a boot script that stubs `EventSource`, pins the clock, and starts the app once the service worker controls the page.
 3. **Deploy.** Only files whose checksum changed are uploaded; `snapshot.json` goes last. Files from the previous snapshot are kept one more round so visitors mid-session don't break.
-4. **Visit.** The service worker maps each API call (minus cache-busting params) to its recorded response, answers spectrogram status checks from what was recorded, refuses writes, and returns `404` for anything the crawl never saw.
+4. **Visit.** The service worker (preloaded with the manifest at install) maps each API call, minus cache-busting params, to its recorded response. It answers spectrogram status checks from what was recorded and returns `401` for protected endpoints, as a real server does for guests, so the UI stays quiet. Writes get `403`, and anything the crawl never saw gets `404`.
 
 ## Install
 
@@ -140,8 +147,8 @@ This creates or reuses the storage zone, pull zone, cache rules, hostname, CNAME
 
 ```sh
 set -a; . ./snapshot.env; set +a
-birdnet-snapshot run -birdnet http://127.0.0.1:8080 -skip-audio doorbell            # once
-birdnet-snapshot run -birdnet http://127.0.0.1:8080 -skip-audio doorbell -every 1h  # forever
+birdnet-snapshot run -birdnet http://127.0.0.1:8080 -skip-audio doorbell -forbid 'home\.lan'   # once
+birdnet-snapshot run -birdnet http://127.0.0.1:8080 -skip-audio doorbell -forbid 'home\.lan' -every 1h  # forever
 ```
 
 ### Running it on a schedule
@@ -196,7 +203,7 @@ systemctl --user daemon-reload && systemctl --user enable --now birdnet-snapshot
 | `deploy` | sync `-out` to the Bunny storage zone. `-dry` shows the plan |
 | `serve` | preview `-out` locally with the CDN's routing rules |
 | `check` | test BirdNET-Go, Chrome and Bunny settings |
-| `bunny-setup` | create/reuse storage zone, pull zone, cache rules, hostname, DNS, certificate. `-delete -yes` tears it down |
+| `bunny-setup` | create/reuse storage zone, pull zone, cache rules, security headers, write blocking, hostname, DNS, certificate. `-purge` clears the edge cache, `-delete -yes` tears it down |
 | `version` | print the version |
 
 ## Configuration
@@ -215,6 +222,10 @@ Every flag has an environment variable, handy for containers and systemd `Enviro
 | `-routes` | `SNAPSHOT_ROUTES` | | extra UI routes to record |
 | `-no-mobile` | `SNAPSHOT_NO_MOBILE` | `false` | skip the phone-layout pass |
 | `-label` | `SNAPSHOT_LABEL` | `Snapshot` | text of the corner pill |
+| `-location` | `SNAPSHOT_LOCATION` | `hide` | coordinates in recorded data: `hide`, `coarse` (~100 km) or `keep` |
+| `-redact` | `SNAPSHOT_REDACT` | | comma-separated regexes replaced with `redacted` |
+| `-forbid` | `SNAPSHOT_FORBID` | | comma-separated regexes that fail the build if found in any published file |
+| `-no-csp` | `SNAPSHOT_NO_CSP` | `false` | leave out the Content-Security-Policy |
 | `-allow-indexing` | `SNAPSHOT_ALLOW_INDEXING` | `false` | let search engines in |
 | `-min-entries` | `SNAPSHOT_MIN_ENTRIES` | `20` | refuse to build from a smaller crawl |
 | `-max-shrink` | `SNAPSHOT_MAX_SHRINK` | `0.5` | refuse to deploy below this share of the live snapshot (`-force` overrides) |
@@ -230,12 +241,18 @@ Every flag has an environment variable, handy for containers and systemd `Enviro
 
 ## Privacy and safety
 
-- **What is published**: only what a logged-out guest of your BirdNET-Go would see. The crawler rewrites `app/config` to the guest view even if your server has no auth.
-- **Never requested**: `/api/v2/settings` (except dashboard display prefs), `system`, `auth`, `streams`, `notifications`, `alerts`, `backup`, `logs`, `integrations`, `import`, `models`, `debug`, `support`, and every SSE stream. Writes are failed inside Chrome before they leave it; the only exception is `POST /api/v2/spectrogram/<id>/generate`, which a guest's browser sends too.
-- **Audio**: clips from sources matching `-skip-audio` and clips whose source is unknown are dropped, including any the browser happened to preload. `-no-audio` drops all of them.
-- **Stream URLs**: `rtsp://user:pass@host/path` in any response becomes `stream/path`.
-- **Indexing**: `noindex, nofollow` meta and a deny-all `robots.txt` unless `-allow-indexing`.
-- **Secrets**: the server needs only the storage zone password. The account API key is for `bunny-setup`, from your workstation.
+| | |
+|---|---|
+| **What is published** | Only what a logged-out guest of your BirdNET-Go would see. The crawler rewrites `app/config` to the guest view even if your server has no auth |
+| **Never requested** | `/api/v2/settings` (except dashboard display prefs), `system`, `auth`, `streams`, `notifications`, `alerts`, `backup`, `logs`, `integrations`, `import`, `models`, `debug`, `support`, and every SSE stream. Writes are failed inside Chrome before they leave it; the only exception is `POST /api/v2/spectrogram/<id>/generate`, which a guest's browser sends too |
+| **Location** | BirdNET-Go puts the station's coordinates in some responses (species rarity, for one). `-location hide` (default) removes every `lat`/`lon`/`latitude`/`longitude` field; `coarse` rounds to whole degrees (~100 km); `keep` leaves them. Sunrise/sunset times and the species list still hint at a region, as on any bird site |
+| **Audio** | Clips from sources matching `-skip-audio` and clips whose source is unknown are dropped, including any the browser preloaded. `-no-audio` drops all of them |
+| **Stream URLs** | `rtsp://user:pass@host/path` in any response becomes `stream/path` |
+| **Your own secrets** | `-redact 'home\.lan,secret-word'` replaces matches in recorded data. `-forbid 'home\.lan,192\.168\.[0-9]+\.[0-9]+'` fails the build if any published file still contains a match |
+| **Content-Security-Policy** | `default-src 'self'`, scripts from the site plus the shell's inline scripts by SHA-256, no third-party requests, no frames, plugins or form posts (`-no-csp` to drop it) |
+| **Edge headers** (`bunny-setup`) | `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` + `frame-ancestors 'none'`, `Referrer-Policy: no-referrer`, a deny-all `Permissions-Policy`, `Cross-Origin-Opener-Policy` and `-Resource-Policy: same-origin`. `POST`/`PUT`/`PATCH`/`DELETE` are blocked at the CDN; TLS 1.0/1.1 are off |
+| **Indexing** | `noindex, nofollow` meta and a deny-all `robots.txt` unless `-allow-indexing` |
+| **Secrets** | The server needs only the storage zone password. The account API key is for `bunny-setup`, from your workstation |
 
 ## Limits
 
@@ -257,7 +274,7 @@ Every flag has an environment variable, handy for containers and systemd `Enviro
 | Caddy | `try_files {path} /ui/index.html` |
 | nginx | `location / { try_files $uri /ui/index.html; }` |
 
-Cache `/_snap/*` and `/ui/assets/*` forever (immutable); keep `snapshot.json`, `sw.js` and HTML short (≤ 60 s).
+Cache `/_snap/*` and `/ui/assets/*.{js,css}` forever (content-addressed); keep everything else, including `snapshot.json`, `sw.js`, HTML and unhashed assets, short (≤ 60 s). Don't cache error responses. Add the security headers from [Privacy and safety](#privacy-and-safety).
 
 ## Monitoring
 
@@ -291,15 +308,17 @@ birdnet_snapshot_info{version="..."}
 | Visitors see an old snapshot | entry files are cached 60 s at the edge; the service worker re-checks every minute |
 | `zone rejected the key` | use the storage zone password (`BUNNY_STORAGE_KEY`), not the account API key |
 
-## Development
+## Testing
 
 ```sh
-go test -short ./...      # unit tests, fake Bunny APIs (no network, no Chrome)
+go test -short ./...      # unit tests and fake Bunny storage/account APIs (no network, no Chrome)
 go test ./...             # + end-to-end: a fake BirdNET-Go crawled by real Chrome, built, served and browsed
-go run . crawl -birdnet http://my-birdnet:8080 -out /tmp/site && go run . serve -out /tmp/site
+cd tests/browsers && go run . -url https://birds.example.com   # Chromium, Firefox and WebKit (Playwright)
 ```
 
-The end-to-end test checks the guarantees above: no denied endpoint or write reaches the server, stream URLs are scrubbed, skipped clips are absent, writes get `403`, spectrogram status is answered from the recording, and the holding page shows before the first snapshot.
+- **End-to-end** (`e2e_test.go`, chromedp): no denied endpoint or write reaches the server, stream URLs and coordinates are scrubbed, skipped clips are absent, species images with spaces load, lazy chunks the crawl never loaded are present, the CSP lets the shell's inline script run, protected endpoints get `401`, writes `403`, spectrogram status is answered from the recording, detail pages never opened by the crawl work through the learned templates, and the holding page shows before the first snapshot.
+- **Browsers** (`tests/browsers`, Playwright): loads a snapshot in Chromium, Firefox and WebKit at desktop and phone sizes, first and repeat visit, and fails on anything a visitor would notice: error toasts, page errors, console errors, broken images, missing assets, a page the service worker doesn't control. Expected guest behaviour (`401` on protected endpoints, `403` on writes) is ignored; data missing from the snapshot is reported as a warning.
+- **CI** runs on a self-hosted runner (rootless Podman). Every job is pinned to `runs-on: [self-hosted, cairn]` and carries a same-repository guard so a fork's pull request never reaches it; `tests/check-runners.sh` enforces that, and outside contributors need approval. The release job builds the binaries and the multi-arch image without a container daemon (`tools/mkimage`). `site.yml` runs the browser check against the live snapshot every 6 hours when the `SITE_URL` variable is set.
 
 ## License
 
