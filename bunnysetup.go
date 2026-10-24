@@ -76,7 +76,9 @@ type pullZone struct {
 		ForceSSL       bool   `json:"ForceSSL"`
 	} `json:"Hostnames"`
 	EdgeRules []struct {
+		Guid             string `json:"Guid"`
 		Description      string `json:"Description"`
+		ActionParameter2 string `json:"ActionParameter2"`
 		ActionType       int    `json:"ActionType"`
 		ActionParameter1 string `json:"ActionParameter1"`
 		Enabled          bool   `json:"Enabled"`
@@ -97,6 +99,9 @@ type dnsZone struct {
 	} `json:"Records"`
 }
 
+// immutablePatterns are the content-addressed paths cached for a year.
+var immutablePatterns = []string{"*/_snap/*", "*/ui/assets/*.js", "*/ui/assets/*.css"}
+
 const (
 	ruleEdge    = "birdnet-snapshot: immutable files, edge 1y"
 	ruleBrowser = "birdnet-snapshot: immutable files, browser 1y"
@@ -111,6 +116,7 @@ type setupOpts struct {
 	EnvFile   string
 	EdgeTTL   int
 	Delete    bool
+	Purge     bool
 	Yes       bool
 	CertTries int
 	CertWait  time.Duration
@@ -126,6 +132,7 @@ func bunnySetupMain(args []string) error {
 	fs.BoolVar(&o.DNS, "dns", true, "add the CNAME when the hostname's zone is hosted on Bunny DNS")
 	fs.StringVar(&o.EnvFile, "env-file", "", "write BUNNY_STORAGE_* settings to this `file` (mode 600) instead of printing them")
 	fs.IntVar(&o.EdgeTTL, "edge-ttl", 60, "edge cache `seconds` for entry files (index, snapshot.json)")
+	fs.BoolVar(&o.Purge, "purge", false, "purge the pull zone's edge cache when done (after changing cache rules)")
 	fs.BoolVar(&o.Delete, "delete", false, "delete the pull zone, storage zone and DNS record instead")
 	fs.BoolVar(&o.Yes, "yes", false, "confirm -delete")
 	fs.Usage = func() {
@@ -210,20 +217,25 @@ func bunnySetup(ctx context.Context, api *bunnyAPI, o setupOpts, out io.Writer) 
 	if err := api.do(ctx, http.MethodPost, fmt.Sprintf("/pullzone/%d", pz.ID), map[string]any{
 		"CacheControlMaxAgeOverride": o.EdgeTTL, "CacheControlPublicMaxAgeOverride": 0,
 		"IgnoreQueryStrings": true, "EnableTLS1": false, "EnableTLS1_1": false,
+		"UseStaleWhileUpdating": true, "UseStaleWhileOffline": true,
 	}, nil); err != nil {
 		return err
 	}
-	// A rule counts as present if one with the same action already covers both
-	// immutable paths, whoever created it.
+	// Only content-addressed paths are cached for a year: snapshot data and
+	// Vite's hashed JS/CSS. Other UI assets (manifest, sounds, icons) keep
+	// their names across BirdNET-Go versions, so they get the short TTL. An
+	// existing rule with the same action is updated in place, whoever made it.
+	want := strings.Join(immutablePatterns, " ")
 	have := map[int]bool{}
+	guids := map[int]string{}
 	for _, r := range pz.EdgeRules {
 		var pats []string
 		for _, t := range r.Triggers {
 			pats = append(pats, t.PatternMatches...)
 		}
-		all := strings.Join(pats, " ")
-		if r.Enabled && r.ActionParameter1 == "31536000" && strings.Contains(all, "/_snap/") && strings.Contains(all, "/ui/assets/") {
-			have[r.ActionType] = true
+		if (r.ActionType == 3 || r.ActionType == 16) && r.ActionParameter1 == "31536000" && strings.Contains(strings.Join(pats, " "), "/_snap/") {
+			guids[r.ActionType] = r.Guid
+			have[r.ActionType] = r.Enabled && strings.Join(pats, " ") == want
 		}
 	}
 	for _, rule := range []struct {
@@ -233,14 +245,22 @@ func bunnySetup(ctx context.Context, api *bunnyAPI, o setupOpts, out io.Writer) 
 		if have[rule.action] {
 			continue
 		}
-		if err := api.do(ctx, http.MethodPost, fmt.Sprintf("/pullzone/%d/edgerules/addOrUpdate", pz.ID), map[string]any{
+		body := map[string]any{
 			"ActionType": rule.action, "ActionParameter1": "31536000", "Enabled": true, "Description": rule.desc,
 			"TriggerMatchingType": 0,
-			"Triggers":            []map[string]any{{"Type": 0, "PatternMatchingType": 0, "PatternMatches": []string{"*/_snap/*", "*/ui/assets/*"}}},
-		}, nil); err != nil {
+			"Triggers":            []map[string]any{{"Type": 0, "PatternMatchingType": 0, "PatternMatches": immutablePatterns}},
+		}
+		verb := "added"
+		if g := guids[rule.action]; g != "" {
+			body["Guid"], verb = g, "updated"
+		}
+		if err := api.do(ctx, http.MethodPost, fmt.Sprintf("/pullzone/%d/edgerules/addOrUpdate", pz.ID), body, nil); err != nil {
 			return err
 		}
-		log.Printf("edge rule added: %s", rule.desc)
+		log.Printf("edge rule %s: %s", verb, rule.desc)
+	}
+	if err := ensureHardening(ctx, api, pz); err != nil {
+		return err
 	}
 	cdnHost := o.Name + ".b-cdn.net"
 	url := "https://" + cdnHost
@@ -283,6 +303,12 @@ func bunnySetup(ctx context.Context, api *bunnyAPI, o setupOpts, out io.Writer) 
 		}
 	}
 
+	if o.Purge {
+		if err := api.do(ctx, http.MethodPost, fmt.Sprintf("/pullzone/%d/purgeCache", pz.ID), nil, nil); err != nil {
+			return err
+		}
+		log.Printf("edge cache purged")
+	}
 	settings := fmt.Sprintf("BUNNY_STORAGE_ZONE=%s\nBUNNY_STORAGE_HOST=%s\nBUNNY_STORAGE_KEY=%s\n", sz.Name, sz.StorageHostname, sz.Password)
 	if o.EnvFile != "" {
 		if err := os.WriteFile(o.EnvFile, []byte(settings), 0o600); err != nil {
@@ -435,4 +461,82 @@ func loadCert(ctx context.Context, api *bunnyAPI, o setupOpts) error {
 		}
 	}
 	return err
+}
+
+// securityHeaders are added to every response at the edge. The page itself
+// carries a stricter Content-Security-Policy (with script hashes) as a meta
+// tag; frame-ancestors only works as a header.
+var securityHeaders = []struct{ Name, Value string }{
+	{"Strict-Transport-Security", "max-age=31536000"},
+	{"X-Content-Type-Options", "nosniff"},
+	{"X-Frame-Options", "DENY"},
+	{"Referrer-Policy", "no-referrer"},
+	{"Permissions-Policy", "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"},
+	{"Cross-Origin-Opener-Policy", "same-origin"},
+	{"Cross-Origin-Resource-Policy", "same-origin"},
+	{"Content-Security-Policy", "frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"},
+}
+
+const ruleBlockMethods = "birdnet-snapshot: read-only, block writes"
+const ruleManifestType = "birdnet-snapshot: web manifest content type"
+
+// ensureHardening adds the security headers and blocks every method but
+// GET/HEAD at the edge. Existing rules are matched by what they do, and
+// header values are updated in place when they differ.
+func ensureHardening(ctx context.Context, api *bunnyAPI, pz *pullZone) error {
+	for _, h := range securityHeaders {
+		guid, same := "", false
+		for _, r := range pz.EdgeRules {
+			if r.ActionType == 5 && strings.EqualFold(r.ActionParameter1, h.Name) {
+				guid, same = r.Guid, r.ActionParameter2 == h.Value && r.Enabled
+			}
+		}
+		if same {
+			continue
+		}
+		rule := map[string]any{
+			"ActionType": 5, "ActionParameter1": h.Name, "ActionParameter2": h.Value, "Enabled": true,
+			"Description": "birdnet-snapshot: " + h.Name, "TriggerMatchingType": 0,
+			"Triggers": []map[string]any{{"Type": 0, "PatternMatchingType": 0, "PatternMatches": []string{"*"}}},
+		}
+		if guid != "" {
+			rule["Guid"] = guid
+		}
+		if err := api.do(ctx, http.MethodPost, fmt.Sprintf("/pullzone/%d/edgerules/addOrUpdate", pz.ID), rule, nil); err != nil {
+			return err
+		}
+		log.Printf("header set at the edge: %s", h.Name)
+	}
+	// Storage serves .webmanifest as application/octet-stream, which nosniff
+	// would make browsers reject.
+	manifestOK := false
+	for _, r := range pz.EdgeRules {
+		if r.Description == ruleManifestType {
+			manifestOK = true
+		}
+	}
+	if !manifestOK {
+		if err := api.do(ctx, http.MethodPost, fmt.Sprintf("/pullzone/%d/edgerules/addOrUpdate", pz.ID), map[string]any{
+			"ActionType": 5, "ActionParameter1": "Content-Type", "ActionParameter2": "application/manifest+json", "Enabled": true,
+			"Description": ruleManifestType, "TriggerMatchingType": 0,
+			"Triggers": []map[string]any{{"Type": 0, "PatternMatchingType": 0, "PatternMatches": []string{"*.webmanifest"}}},
+		}, nil); err != nil {
+			return err
+		}
+		log.Printf("edge rule added: %s", ruleManifestType)
+	}
+	for _, r := range pz.EdgeRules {
+		if r.ActionType == 4 && r.Description == ruleBlockMethods {
+			return nil
+		}
+	}
+	// 4 = block request; trigger 9 = request method.
+	if err := api.do(ctx, http.MethodPost, fmt.Sprintf("/pullzone/%d/edgerules/addOrUpdate", pz.ID), map[string]any{
+		"ActionType": 4, "Enabled": true, "Description": ruleBlockMethods, "TriggerMatchingType": 0,
+		"Triggers": []map[string]any{{"Type": 9, "PatternMatchingType": 0, "PatternMatches": []string{"POST", "PUT", "PATCH", "DELETE"}}},
+	}, nil); err != nil {
+		return err
+	}
+	log.Printf("edge rule added: %s", ruleBlockMethods)
+	return nil
 }

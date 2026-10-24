@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
@@ -36,6 +37,9 @@ var fakeDetections = []map[string]any{
 
 const fakeApp = `
 const app = document.getElementById('app');
+window.__notif = await fetch('/api/v2/notifications?limit=20&status=unread').then(r => r.status, () => 'blocked');
+window.__loadLazy = () => import('./Lazy-e2e.js').then(m => m.default);
+window.__rarity = await fetch('/api/v2/species?scientific_name=Bubo%20virginianus').then(r => r.json());
 const cfg = await (await fetch('/api/v2/app/config')).json();
 window.__guest = cfg.security.enabled && !cfg.security.accessAllowed;
 new EventSource('/api/v2/detections/stream');
@@ -44,6 +48,7 @@ window.__write = await fetch('/api/v2/detections/31', { method: 'DELETE' }).then
 const m = location.pathname.match(/^\/ui\/detections\/(\d+)$/);
 if (m) {
   const d = await (await fetch('/api/v2/detections/' + m[1])).json();
+  window.__tax = await fetch('/api/v2/species/taxonomy?scientific_name=' + encodeURIComponent(d.scientificName)).then(r => r.status);
   window.__specStatus = await fetch('/api/v2/spectrogram/' + d.id + '/status?size=lg').then(r => r.ok ? r.json().then(j => j.data.status) : r.status);
   window.__missingStatus = await fetch('/api/v2/spectrogram/999/status?size=lg').then(r => r.status);
   app.innerHTML = '<h1 id="title">' + d.commonName + '</h1><img id="spec" src="/api/v2/spectrogram/' + d.id + '?size=lg&cache=' + Date.now() + '">';
@@ -53,9 +58,11 @@ if (m) {
 } else {
   const date = new URLSearchParams(location.search).get('date') || 'none';
   const list = await (await fetch('/api/v2/detections/recent?limit=5&date=' + date + '&t=' + Date.now())).json();
-  app.innerHTML = '<h1 id="title">Dashboard ' + date + '</h1><ul>' +
+  app.innerHTML = '<img id="thumb" src="/api/v2/media/image/Bubo%20virginianus"><h1 id="title">Dashboard ' + date + '</h1><ul>' +
     list.map(d => '<li class="det">' + d.commonName + '</li>').join('') + '</ul>' +
     list.map(d => '<a href="/ui/detections?queryType=species&species=' + encodeURIComponent(d.scientificName) + '&date=' + date + '">' + d.commonName + '</a>').join('');
+  await new Promise(r => { const i = document.getElementById('thumb'); if (i.complete) r(); else i.onload = i.onerror = r; });
+  window.__thumb = document.getElementById('thumb').naturalWidth;
 }
 app.dataset.ready = '1';
 `
@@ -69,6 +76,16 @@ func (f *fakeBirdNET) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Unlock()
 	p := r.URL.Path
 	switch {
+	case p == "/ui/assets/Lazy-e2e.js":
+		w.Header().Set("Content-Type", "text/javascript")
+		fmt.Fprint(w, `export default "lazy-ok";`)
+	case p == "/api/v2/media/image/Bubo virginianus":
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(pngPixel)
+	case p == "/api/v2/species/taxonomy":
+		writeJSON(w, map[string]any{"genus": strings.SplitN(r.URL.Query().Get("scientific_name"), " ", 2)[0]})
+	case p == "/api/v2/species":
+		writeJSON(w, map[string]any{"rarity": map[string]any{"status": "common", "latitude": 34.0312, "longitude": -118.4712}})
 	case strings.HasPrefix(p, "/ui/assets/index-e2e.js"):
 		w.Header().Set("Content-Type", "text/javascript")
 		fmt.Fprint(w, fakeApp)
@@ -76,7 +93,8 @@ func (f *fakeBirdNET) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	case strings.HasPrefix(p, "/ui"):
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, strings.Replace(testShell, "/ui/assets/index-abc.js", "/ui/assets/index-e2e.js", 1))
+		shellHTML := strings.Replace(testShell, "/ui/assets/index-abc.js", "/ui/assets/index-e2e.js", 1)
+		fmt.Fprint(w, strings.Replace(shellHTML, "<title>", "<script>window.__inline = 1;</script><title>", 1))
 	case p == "/api/v2/app/config":
 		writeJSON(w, map[string]any{"csrfToken": "tok", "version": "e2e", "security": map[string]any{"enabled": false, "accessAllowed": true}})
 	case p == "/api/v2/detections/recent":
@@ -154,7 +172,11 @@ func TestEndToEnd(t *testing.T) {
 	birdnet := httptest.NewServer(fb)
 	defer birdnet.Close()
 
-	out := filepath.Join(t.TempDir(), "site")
+	// CI keeps the built site (BNS_E2E_KEEP) to run the browser matrix on it.
+	out := os.Getenv("BNS_E2E_KEEP")
+	if out == "" {
+		out = filepath.Join(t.TempDir(), "site")
+	}
 	c := config{
 		BirdNET: birdnet.URL, Out: out, Days: 1, MaxPages: 12, MaxClips: 10, Label: "E2E",
 		SkipAudio: []string{"doorbell"}, PageWait: 5 * time.Second, Budget: 3 * time.Minute, MinEntries: 3,
@@ -250,6 +272,33 @@ func TestEndToEnd(t *testing.T) {
 		t.Errorf("write should get 403 from the service worker, got %v", write)
 	}
 
+	var notif, thumb, inline, lazy, rarityLat any
+	err = chromedp.Run(tab,
+		chromedp.Evaluate(`window.__notif`, &notif),
+		chromedp.Evaluate(`window.__thumb`, &thumb),
+		chromedp.Evaluate(`window.__inline`, &inline),
+		chromedp.Evaluate(`window.__rarity && window.__rarity.rarity && window.__rarity.rarity.latitude`, &rarityLat),
+		chromedp.Evaluate(`window.__loadLazy()`, &lazy, func(p *runtime.EvaluateParams) *runtime.EvaluateParams { return p.WithAwaitPromise(true) }),
+	)
+	if err != nil {
+		t.Fatalf("dashboard checks: %v", err)
+	}
+	if fmt.Sprint(notif) != "401" {
+		t.Errorf("protected endpoint should get 401 (the UI stays quiet), got %v", notif)
+	}
+	if fmt.Sprint(thumb) != "1" {
+		t.Errorf("species image with a space in its name did not load: width %v", thumb)
+	}
+	if fmt.Sprint(inline) != "1" {
+		t.Errorf("the shell's inline script was blocked by the CSP")
+	}
+	if fmt.Sprint(lazy) != "lazy-ok" {
+		t.Errorf("lazy chunk the crawl never loaded is missing: %v", lazy)
+	}
+	if rarityLat != nil {
+		t.Errorf("coordinates published: latitude %v", rarityLat)
+	}
+
 	var specWidth, audio float64
 	var specStatus, missingStatus any
 	err = chromedp.Run(tab,
@@ -269,6 +318,22 @@ func TestEndToEnd(t *testing.T) {
 	}
 	if title != "Black Phoebe" || specWidth != 1 || audio != 200 {
 		t.Errorf("detail page: title %q, spectrogram width %v, audio %v", title, specWidth, audio)
+	}
+
+	// Detection 31 (owl) was never opened by the crawl: its detail and
+	// per-species data come from the learned {id} and {sci} templates.
+	var tax any
+	err = chromedp.Run(tab,
+		chromedp.Navigate(site.URL+"/ui/detections/31"),
+		chromedp.WaitVisible(`#app[data-ready="1"]`, chromedp.ByQuery),
+		chromedp.Text(`#title`, &title, chromedp.ByQuery),
+		chromedp.Evaluate(`window.__tax`, &tax),
+	)
+	if err != nil {
+		t.Fatalf("unvisited detail page: %v", err)
+	}
+	if title != "Great Horned Owl" || fmt.Sprint(tax) != "200" {
+		t.Errorf("unvisited detail page: title %q, taxonomy status %v (want the {sci} template replayed)", title, tax)
 	}
 
 	// The doorbell detection's clip is absent: 404 from the service worker.

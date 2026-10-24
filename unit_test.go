@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -194,7 +196,7 @@ const testShell = `<!doctype html>
 </body></html>`
 
 func TestShell(t *testing.T) {
-	out, err := shell([]byte(testShell), false)
+	out, err := shell([]byte(testShell), false, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,11 +209,11 @@ func TestShell(t *testing.T) {
 	if strings.Contains(s, `type="module"`) || strings.Contains(s, "navigator.serviceWorker.register") {
 		t.Errorf("entry or app service worker not removed:\n%s", s)
 	}
-	out, _ = shell([]byte(testShell), true)
+	out, _ = shell([]byte(testShell), true, true)
 	if strings.Contains(string(out), "noindex") {
 		t.Error("allowIndex must drop the robots meta")
 	}
-	if _, err := shell([]byte("<html><head></head></html>"), false); err == nil {
+	if _, err := shell([]byte("<html><head></head></html>"), false, true); err == nil {
 		t.Error("want error without a module entry")
 	}
 }
@@ -556,5 +558,141 @@ func TestRetryMedia(t *testing.T) {
 		if strings.Contains(h, "spectrogram/6") || strings.Contains(h, "detections") {
 			t.Errorf("unexpected request %s", h)
 		}
+	}
+}
+
+func TestRedactor(t *testing.T) {
+	body := []byte(`{"rarity":{"score":0.9,"latitude":34.0312,"longitude":-118.4712,"location_based":true},
+		"list":[{"lat":51.5,"lng":-0.12,"name":"x"}],"note":"call home.example.lan","label":"latitude"}`)
+	c := &capture{MIME: "application/json", Body: body}
+
+	hide, _ := newRedactor(config{Location: "hide", Redact: []string{`home\.example\.lan`}})
+	out := string(hide.apply(c))
+	for _, bad := range []string{"34.03", "118.47", "51.5", "-0.12", "home.example.lan"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("hide left %q in %s", bad, out)
+		}
+	}
+	if !strings.Contains(out, `"location_based":true`) || !strings.Contains(out, `"label":"latitude"`) || !strings.Contains(out, "redacted") {
+		t.Errorf("hide removed too much: %s", out)
+	}
+
+	coarse, _ := newRedactor(config{Location: "coarse"})
+	out = string(coarse.apply(c))
+	if !strings.Contains(out, `"latitude":34`) || !strings.Contains(out, `"longitude":-118`) || strings.Contains(out, "34.03") {
+		t.Errorf("coarse: %s", out)
+	}
+
+	keep, _ := newRedactor(config{Location: "keep"})
+	if !strings.Contains(string(keep.apply(c)), "34.0312") {
+		t.Error("keep must not touch coordinates")
+	}
+	plain := &capture{MIME: "application/json", Body: []byte(`{"a":1}`)}
+	if string(hide.apply(plain)) != `{"a":1}` {
+		t.Error("bodies without coordinates must be byte-identical (content addressing)")
+	}
+	if _, err := newRedactor(config{Location: "blur"}); err == nil {
+		t.Error("bad -location must be rejected")
+	}
+	if _, err := newRedactor(config{Forbid: []string{"("}}); err == nil {
+		t.Error("bad -forbid regex must be rejected")
+	}
+}
+
+func TestForbidFailsBuild(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "site")
+	st := newTestStore()
+	st.index = []byte(testShell)
+	st.put(&capture{Key: "/api/v2/app/config", MIME: "application/json", Body: []byte(`{"host":"birdnet.home.lan"}`)})
+	_, err := buildSite(config{Out: dir, Forbid: []string{`home\.lan`}}, st, time.Now())
+	if err == nil || !strings.Contains(err.Error(), "forbidden pattern") {
+		t.Fatalf("want forbidden pattern error, got %v", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Error("nothing may be published when a forbidden pattern is found")
+	}
+}
+
+func TestShellCSP(t *testing.T) {
+	src := strings.Replace(testShell, "<title>", "<script>window.__inline = 1;</script><title>", 1)
+	out, err := shell([]byte(src), false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	m := regexp.MustCompile(`http-equiv="Content-Security-Policy" content="([^"]+)"`).FindStringSubmatch(s)
+	if m == nil {
+		t.Fatalf("no CSP meta:\n%s", s)
+	}
+	csp := strings.ReplaceAll(m[1], "&#39;", "'")
+	sum := sha256.Sum256([]byte("window.__inline = 1;"))
+	want := "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+	if !strings.Contains(csp, want) {
+		t.Errorf("inline script hash %s missing from %s", want, csp)
+	}
+	for _, d := range []string{"default-src 'self'", "connect-src 'self'", "object-src 'none'", "base-uri 'none'", "form-action 'none'"} {
+		if !strings.Contains(csp, d) {
+			t.Errorf("CSP lacks %q", d)
+		}
+	}
+	if strings.Contains(csp, "unsafe-inline' 'sha") || strings.Contains(strings.Split(csp, "style-src")[0], "unsafe-inline") {
+		t.Errorf("scripts must not allow unsafe-inline: %s", csp)
+	}
+	if i := strings.Index(s, "Content-Security-Policy"); i > strings.Index(s, "<script") {
+		t.Error("CSP meta must come before every script")
+	}
+	if out, _ := shell([]byte(src), false, false); strings.Contains(string(out), "Content-Security-Policy") {
+		t.Error("-no-csp must drop the meta")
+	}
+}
+
+func TestAssetClosure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/ui/assets/Lazy-1.js":
+			w.Header().Set("Content-Type", "text/javascript")
+			_, _ = w.Write([]byte(`import("./Deeper-2.js")`))
+		case "/ui/assets/Deeper-2.js":
+			w.Header().Set("Content-Type", "text/javascript")
+			_, _ = w.Write([]byte(`1`))
+		case "/ui/assets/font.woff2":
+			w.Header().Set("Content-Type", "font/woff2")
+			_, _ = w.Write([]byte(`wOF2`))
+		case "/ui/assets/bird-placeholder.svg":
+			w.Header().Set("Content-Type", "image/svg+xml")
+			_, _ = w.Write([]byte(`<svg/>`))
+		default: // SPA fallback, like BirdNET-Go
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`<html>`))
+		}
+	}))
+	defer srv.Close()
+	st := newTestStore()
+	st.put(&capture{Key: "/ui/assets/index-a.js", MIME: "text/javascript",
+		Body: []byte(`const a=()=>import("./Lazy-1.js");const p="/ui/assets/bird-placeholder.svg";const m="./Missing-9.js";const x="https://cdn.example/x.js"`)})
+	st.put(&capture{Key: "/ui/assets/index-a.css", MIME: "text/css", Body: []byte(`@font-face{src:url(./font.woff2)}.x{background:url(data:image/png;base64,AA)}`)})
+	if err := fetchAssetClosure(context.Background(), config{BirdNET: srv.URL}, st); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"/ui/assets/Lazy-1.js", "/ui/assets/Deeper-2.js", "/ui/assets/font.woff2", "/ui/assets/bird-placeholder.svg"} {
+		if !st.has(k) {
+			t.Errorf("closure missed %s (have %v)", k, sortedKeys(st.items))
+		}
+	}
+	if st.has("/ui/assets/Missing-9.js") {
+		t.Error("the HTML fallback must not be stored as a chunk")
+	}
+}
+
+func TestSnapshotListsProtected(t *testing.T) {
+	_, dir := buildTestSite(t, nil)
+	var info snapshotInfo
+	readJSON(t, filepath.Join(dir, "snapshot.json"), &info)
+	has := map[string]bool{}
+	for _, p := range info.Protected {
+		has[p] = true
+	}
+	if !has["/api/v2/notifications"] || !has["/api/v2/settings"] {
+		t.Errorf("protected list %v", info.Protected)
 	}
 }

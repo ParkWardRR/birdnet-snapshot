@@ -461,18 +461,37 @@ func learnDetailTemplates(st *store, visit func(string) []string) {
 		}
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] > ids[j] })
-	if len(ids) > 2 {
-		ids = ids[:2]
+	// Two recent detections of different species, so per-species URLs (taxonomy,
+	// image credits, rarity) are learned as {sci} templates too.
+	var pick []int64
+	for _, id := range ids {
+		if len(pick) == 0 || (len(pick) == 1 && dets[id].Sci != dets[pick[0]].Sci) {
+			pick = append(pick, id)
+		}
 	}
+	ids = pick
 	tpl := map[string]int{}
 	for _, id := range ids {
 		page := fmt.Sprintf("/ui/detections/%d", id)
 		visit(page)
 		re := regexp.MustCompile(`\b` + strconv.FormatInt(id, 10) + `\b`)
+		sci := encodeURIComponent(dets[id].Sci)
+		seen := map[string]bool{}
 		st.mu.Lock()
 		for _, k := range st.byPage[page] {
-			if strings.HasPrefix(k, "/api/") && re.MatchString(k) && !strings.HasPrefix(k, "/api/v2/audio/") {
-				tpl[re.ReplaceAllString(k, "{id}")]++
+			if !strings.HasPrefix(k, "/api/") || strings.HasPrefix(k, "/api/v2/audio/") {
+				continue
+			}
+			t := k
+			if re.MatchString(t) {
+				t = re.ReplaceAllString(t, "{id}")
+			}
+			if sci != "" && strings.Contains(t, sci) {
+				t = strings.ReplaceAll(t, sci, "{sci}")
+			}
+			if t != k && !seen[t] {
+				seen[t] = true
+				tpl[t]++
 			}
 		}
 		st.mu.Unlock()
@@ -546,7 +565,8 @@ func guestJSON(client *http.Client, u string) ([]byte, error) {
 // (web/sw.js, keep in sync) drop them so a recorded response still matches.
 var volatileParams = map[string]bool{"t": true, "cache": true, "retry": true}
 
-// key is the lookup key of a URL: path plus raw query minus volatile params.
+// key is the lookup key of a URL: escaped path (as a browser's URL.pathname
+// has it, "Bubo%20virginianus") plus raw query minus volatile params.
 func key(u *url.URL) string {
 	var keep []string
 	for _, p := range strings.Split(u.RawQuery, "&") {
@@ -556,9 +576,9 @@ func key(u *url.URL) string {
 		}
 	}
 	if len(keep) == 0 {
-		return u.Path
+		return u.EscapedPath()
 	}
-	return u.Path + "?" + strings.Join(keep, "&")
+	return u.EscapedPath() + "?" + strings.Join(keep, "&")
 }
 
 func allowedRoute(p string) bool {

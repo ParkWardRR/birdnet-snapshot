@@ -3,11 +3,13 @@ package main
 import (
 	"crypto/sha256"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html"
 	"log"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -34,14 +36,15 @@ type manifest struct {
 
 // snapshotInfo is /snapshot.json, the only file the service worker re-reads.
 type snapshotInfo struct {
-	Manifest    string `json:"manifest"`
-	GeneratedAt int64  `json:"generatedAt"` // epoch ms
-	ServerTZ    int    `json:"serverTZ"`    // JS getTimezoneOffset of the server
-	ServerToday string `json:"serverToday"` // YYYY-MM-DD in the server's zone
-	Pages       int    `json:"pages"`
-	Entries     int    `json:"entries"`
-	Label       string `json:"label"`   // text of the snapshot pill
-	Version     string `json:"version"` // birdnet-snapshot version that built it
+	Manifest    string   `json:"manifest"`
+	GeneratedAt int64    `json:"generatedAt"` // epoch ms
+	ServerTZ    int      `json:"serverTZ"`    // JS getTimezoneOffset of the server
+	ServerToday string   `json:"serverToday"` // YYYY-MM-DD in the server's zone
+	Pages       int      `json:"pages"`
+	Entries     int      `json:"entries"`
+	Label       string   `json:"label"`     // text of the snapshot pill
+	Version     string   `json:"version"`   // birdnet-snapshot version that built it
+	Protected   []string `json:"protected"` // API prefixes the service worker answers with 401, like a server does for guests
 }
 
 // buildResult summarises a build for logs and metrics.
@@ -64,13 +67,11 @@ var (
 	headOpenRe = regexp.MustCompile(`<head>`)
 )
 
-// sanitize scrubs recorded JSON: stream URLs can carry hostnames and
-// credentials, so only their last path segment survives.
+// sanitize scrubs recorded JSON with the default redactor: stream URLs (which
+// can carry hostnames and credentials) keep only their last path segment and
+// coordinates are removed.
 func sanitize(c *capture) []byte {
-	if !isJSON(c.MIME) {
-		return c.Body
-	}
-	return rtspRe.ReplaceAll(c.Body, []byte("stream/$1"))
+	return (&redactor{location: locationHide}).apply(c)
 }
 
 func buildSite(c config, st *store, started time.Time) (*buildResult, error) {
@@ -83,8 +84,15 @@ func buildSite(c config, st *store, started time.Time) (*buildResult, error) {
 	if err := os.RemoveAll(tmp); err != nil {
 		return nil, err
 	}
+	red, err := newRedactor(c)
+	if err != nil {
+		return nil, err
+	}
 	m := manifest{GeneratedAt: built.UnixMilli(), Entries: map[string]manifestEntry{}}
 	write := func(rel string, b []byte) error {
+		if err := red.check(rel, b); err != nil {
+			return err
+		}
 		rel = path.Clean("/" + rel)
 		dst := filepath.Join(tmp, filepath.FromSlash(rel))
 		if !strings.HasPrefix(dst, filepath.Clean(tmp)+string(os.PathSeparator)) {
@@ -104,10 +112,14 @@ func buildSite(c config, st *store, started time.Time) (*buildResult, error) {
 	for _, k := range sortedKeys(st.items) {
 		it := st.items[k]
 		p, q, _ := strings.Cut(k, "?")
-		body := sanitize(it)
+		body := red.apply(it)
 		if q == "" && !strings.HasPrefix(p, "/api/") {
 			if strings.HasSuffix(p, "/") || p == "/index.html" || p == "/ui/index.html" {
 				continue
+			}
+			// Keys are escaped like URL.pathname; files are stored by name.
+			if up, err := url.PathUnescape(p); err == nil {
+				p = up
 			}
 			if err := write(p, body); err != nil {
 				return nil, err
@@ -134,7 +146,7 @@ func buildSite(c config, st *store, started time.Time) (*buildResult, error) {
 	}
 	res.Entries = len(m.Entries)
 
-	idx, err := shell(st.index, c.AllowIndex)
+	idx, err := shell(st.index, c.AllowIndex, !c.NoCSP)
 	if err != nil {
 		return nil, err
 	}
@@ -196,6 +208,7 @@ func buildSite(c config, st *store, started time.Time) (*buildResult, error) {
 		Entries:     len(m.Entries),
 		Label:       c.Label,
 		Version:     version,
+		Protected:   protectedAPI(),
 	}
 	ib, _ := json.MarshalIndent(info, "", "  ")
 	if err := write("snapshot.json", ib); err != nil {
@@ -224,26 +237,68 @@ func buildSite(c config, st *store, started time.Time) (*buildResult, error) {
 
 // shell turns the recorded SPA index into the snapshot's: the app's own
 // service worker registration is dropped, the module entry is started by
-// boot.js once our worker controls the page, and indexing is disabled unless
-// allowed.
-func shell(index []byte, allowIndex bool) ([]byte, error) {
+// boot.js once our worker controls the page, indexing is disabled unless
+// allowed, and a Content-Security-Policy allows only same-origin code plus
+// the shell's own inline scripts (by hash).
+func shell(index []byte, allowIndex, csp bool) ([]byte, error) {
 	idx := swRegRe.ReplaceAll(index, nil)
 	em := entryRe.FindSubmatch(idx)
 	if em == nil {
 		return nil, fmt.Errorf("SPA shell has no module entry script; BirdNET-Go UI changed?")
 	}
 	idx = entryRe.ReplaceAll(idx, nil)
-	robots := ""
-	if !allowIndex {
-		robots = "\n    <meta name=\"robots\" content=\"noindex, nofollow\" />"
-	}
-	inject := fmt.Sprintf(`<head>%s
-    <link rel="stylesheet" href="/_snapshot/snapshot.css" />
-    <script src="/_snapshot/boot.js" data-entry="%s"></script>`, robots, html.EscapeString(string(em[1])))
 	if !headOpenRe.Match(idx) {
 		return nil, fmt.Errorf("SPA shell has no <head>")
 	}
+	var meta strings.Builder
+	if csp {
+		meta.WriteString("\n    <meta http-equiv=\"Content-Security-Policy\" content=\"" + html.EscapeString(contentSecurityPolicy(idx)) + "\" />")
+	}
+	if !allowIndex {
+		meta.WriteString("\n    <meta name=\"robots\" content=\"noindex, nofollow\" />")
+	}
+	meta.WriteString("\n    <meta name=\"referrer\" content=\"no-referrer\" />")
+	inject := fmt.Sprintf(`<head>%s
+    <link rel="stylesheet" href="/_snapshot/snapshot.css" />
+    <script src="/_snapshot/boot.js" data-entry="%s"></script>`, meta.String(), html.EscapeString(string(em[1])))
 	return headOpenRe.ReplaceAll(idx, []byte(inject)), nil
+}
+
+var inlineScriptRe = regexp.MustCompile(`(?s)<script(?:\s[^>]*)?>(.*?)</script>`)
+
+// contentSecurityPolicy allows same-origin scripts, the inline scripts of
+// this shell by hash, and nothing from anywhere else: no third-party
+// requests, frames, plugins or form posts.
+func contentSecurityPolicy(shellHTML []byte) string {
+	scripts := []string{"'self'"}
+	for _, m := range inlineScriptRe.FindAllSubmatch(shellHTML, -1) {
+		if strings.Contains(string(m[0][:strings.Index(string(m[0]), ">")]), "src=") || len(m[1]) == 0 {
+			continue
+		}
+		sum := sha256.Sum256(m[1])
+		scripts = append(scripts, "'sha256-"+base64.StdEncoding.EncodeToString(sum[:])+"'")
+	}
+	return strings.Join([]string{
+		"default-src 'self'",
+		"script-src " + strings.Join(scripts, " "),
+		"style-src 'self' 'unsafe-inline'",
+		"img-src 'self' data: blob:",
+		"media-src 'self' data: blob:",
+		"font-src 'self' data:",
+		"connect-src 'self'",
+		"worker-src 'self'",
+		"manifest-src 'self'",
+		"object-src 'none'",
+		"base-uri 'none'",
+		"form-action 'none'",
+	}, "; ")
+}
+
+// protectedAPI lists the API prefixes a guest gets 401 for; the service
+// worker answers them the same way so the UI stays quiet, as it does for a
+// logged-out visitor of a real server.
+func protectedAPI() []string {
+	return append([]string(nil), deniedAPI...)
 }
 
 func extFor(mime string) string {

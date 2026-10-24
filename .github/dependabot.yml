@@ -4,6 +4,19 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    ignore:
+      # chromedp v0.17+ dropped ListenTarget/NewRemoteAllocator (the crawler's
+      # API) and cdproto must match chromedp; bump them together, by hand.
+      - dependency-name: github.com/chromedp/chromedp
+        versions: [">= 0.16.0"]
+      - dependency-name: github.com/chromedp/cdproto
+  - package-ecosystem: gomod
+    directory: /tests/browsers
+    schedule:
+      interval: monthly
+    ignore:
+      # Newer playwright-go releases need a driver that is no longer downloadable.
+      - dependency-name: github.com/playwright-community/playwright-go
   - package-ecosystem: github-actions
     directory: /
     schedule:

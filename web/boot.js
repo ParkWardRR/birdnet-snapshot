@@ -94,28 +94,40 @@
     });
   }
 
+  // Start the network work now, in parallel, without waiting for the DOM.
+  var hasSW = 'serviceWorker' in navigator;
+  var infoP = fetch('/snapshot.json', { cache: 'no-store' }).then(function (r) {
+    if (!r.ok) throw new Error(String(r.status));
+    return r.json();
+  });
+  infoP.catch(function () {});
+  var regP = hasSW ? navigator.serviceWorker.register('/sw.js', { scope: '/' }) : null;
+
   async function start() {
-    if (!('serviceWorker' in navigator)) {
+    if (!hasSW) {
       overlay('<h1>BirdNET-Go</h1><p>This page needs a current browser with service workers enabled.</p>');
       return;
     }
-    overlay('<h1>BirdNET-Go</h1><p>Loading the latest snapshot…</p>');
+    // Only show the loading screen if starting takes a moment (first visit).
+    var slow = setTimeout(function () {
+      overlay('<h1>BirdNET-Go</h1><p>Loading the latest snapshot…</p>');
+    }, 400);
     var info;
     try {
-      var r = await fetch('/snapshot.json', { cache: 'no-store' });
-      if (!r.ok) throw new Error(r.status);
-      info = await r.json();
+      info = await infoP;
     } catch (e) {
+      clearTimeout(slow);
       overlay('<h1>BirdNET-Go</h1><p>The first snapshot is being prepared.<br>Check back in a few minutes.</p>');
       setTimeout(function () { location.reload(); }, 60000);
       return;
     }
-    await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+    await regP;
     await controlled();
     sessionStorage.removeItem('snapshot-reloaded');
     pinClock(info.generatedAt);
     pinDashboardDate(info);
     await import(entry);
+    clearTimeout(slow);
     banner(info);
     var splash = document.getElementById('snapshot-splash');
     if (splash) splash.remove();

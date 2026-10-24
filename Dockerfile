@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # birdnet-snapshot with headless Chrome bundled: one container, no other setup.
-FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.26 AS build
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.27 AS build
 ARG TARGETOS TARGETARCH VERSION=dev
 WORKDIR /src
 COPY go.mod go.sum ./

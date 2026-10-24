@@ -65,7 +65,7 @@ func checkBirdNET(ctx context.Context, base string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := shell(shellHTML, false); err != nil {
+	if _, err := shell(shellHTML, false, true); err != nil {
 		return "", err
 	}
 	d := fmt.Sprintf("%s, BirdNET-Go %s", base, cfg.Version)

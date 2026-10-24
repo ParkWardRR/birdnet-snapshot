@@ -38,6 +38,10 @@ type config struct {
 	Routes      []string      // extra UI routes to record
 	NoMobile    bool          // skip the phone-layout pass
 	Label       string        // text of the snapshot pill
+	Location    string        // coordinates in recorded JSON: hide, coarse or keep
+	Redact      []string      // regexes replaced with "redacted" in recorded JSON
+	Forbid      []string      // regexes that fail the build if found in any published file
+	NoCSP       bool          // leave out the Content-Security-Policy meta tag
 	AllowIndex  bool          // let search engines index the snapshot
 	MinEntries  int           // refuse to build from a crawl with fewer API entries
 	MaxShrink   float64       // refuse to deploy if entries fall below this share of the live snapshot
@@ -114,6 +118,10 @@ func parseFlags(cmd string, args []string) (config, string) {
 	routes := fs.String("routes", env("SNAPSHOT_ROUTES", ""), "extra comma-separated UI `routes` to record, e.g. /ui/analytics/advanced [SNAPSHOT_ROUTES]")
 	fs.BoolVar(&c.NoMobile, "no-mobile", envBool("SNAPSHOT_NO_MOBILE", false), "skip the phone-layout pass [SNAPSHOT_NO_MOBILE]")
 	fs.StringVar(&c.Label, "label", env("SNAPSHOT_LABEL", "Snapshot"), "`text` of the snapshot pill, followed by the time [SNAPSHOT_LABEL]")
+	fs.StringVar(&c.Location, "location", env("SNAPSHOT_LOCATION", "hide"), "coordinates in recorded data: hide (remove), coarse (whole degrees, ~100 km) or keep [SNAPSHOT_LOCATION]")
+	redact := fs.String("redact", env("SNAPSHOT_REDACT", ""), "comma-separated `regexes` replaced with \"redacted\" in recorded data [SNAPSHOT_REDACT]")
+	forbid := fs.String("forbid", env("SNAPSHOT_FORBID", ""), "comma-separated `regexes` that fail the build if found in any published file, e.g. a home hostname [SNAPSHOT_FORBID]")
+	fs.BoolVar(&c.NoCSP, "no-csp", envBool("SNAPSHOT_NO_CSP", false), "leave out the Content-Security-Policy meta tag [SNAPSHOT_NO_CSP]")
 	fs.BoolVar(&c.AllowIndex, "allow-indexing", envBool("SNAPSHOT_ALLOW_INDEXING", false), "let search engines index the snapshot (default: noindex + robots.txt) [SNAPSHOT_ALLOW_INDEXING]")
 	fs.IntVar(&c.MinEntries, "min-entries", envInt("SNAPSHOT_MIN_ENTRIES", 20), "refuse to build from a crawl with fewer API responses [SNAPSHOT_MIN_ENTRIES]")
 	fs.Float64Var(&c.MaxShrink, "max-shrink", envFloat("SNAPSHOT_MAX_SHRINK", 0.5), "refuse to deploy if entries fall below this `share` of the live snapshot; 0 disables [SNAPSHOT_MAX_SHRINK]")
@@ -135,6 +143,8 @@ func parseFlags(cmd string, args []string) (config, string) {
 	c.ZoneKey = os.Getenv("BUNNY_STORAGE_KEY")
 	c.SkipAudio = splitList(strings.ToLower(*skip))
 	c.Routes = splitList(*routes)
+	c.Redact = splitList(*redact)
+	c.Forbid = splitList(*forbid)
 	c.BirdNET = strings.TrimRight(c.BirdNET, "/")
 	if c.Concurrency < 1 {
 		c.Concurrency = 1
@@ -196,6 +206,9 @@ func crawlAndBuild(ctx context.Context, c config) (*buildResult, error) {
 	}
 	crawled := time.Since(start)
 	if err := fetchClips(ctx, c, st); err != nil {
+		return nil, err
+	}
+	if err := fetchAssetClosure(ctx, c, st); err != nil {
 		return nil, err
 	}
 	if err := validate(c, st); err != nil {

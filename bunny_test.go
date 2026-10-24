@@ -296,6 +296,8 @@ func (a *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"Hostnames": []any{map[string]any{"Value": fmt.Sprint(in["Name"]) + ".b-cdn.net", "HasCertificate": true}}, "EdgeRules": []any{}}
 		a.pulls = append(a.pulls, z)
 		_ = enc.Encode(z)
+	case strings.HasSuffix(r.URL.Path, "/purgeCache"):
+		w.WriteHeader(http.StatusNoContent)
 	case r.URL.Path == "/pullzone/loadFreeCertificate":
 		if !a.certOK {
 			http.Error(w, `{"Message":"DNS not ready"}`, http.StatusBadRequest)
@@ -328,8 +330,18 @@ func (a *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				z[k] = v
 			}
 		case parts[2] == "edgerules":
-			z["EdgeRules"] = append(z["EdgeRules"].([]any), map[string]any{"Description": in["Description"],
-				"ActionType": in["ActionType"], "ActionParameter1": in["ActionParameter1"], "Enabled": in["Enabled"], "Triggers": in["Triggers"]})
+			if in["Guid"] != nil {
+				for _, r := range z["EdgeRules"].([]any) {
+					if rm := r.(map[string]any); rm["Guid"] == in["Guid"] {
+						for k, v := range in {
+							rm[k] = v
+						}
+					}
+				}
+				break
+			}
+			in["Guid"] = fmt.Sprint(a.id())
+			z["EdgeRules"] = append(z["EdgeRules"].([]any), in)
 		case parts[2] == "addHostname":
 			z["Hostnames"] = append(z["Hostnames"].([]any), map[string]any{"Value": in["Hostname"], "HasCertificate": false, "ForceSSL": false})
 		case parts[2] == "setForceSSL":
@@ -413,7 +425,7 @@ func TestBunnySetupIsIdempotent(t *testing.T) {
 	if len(fa.storage)+len(fa.pulls) != before || len(fa.dns[0]["Records"].([]any)) != 1 {
 		t.Error("second run duplicated resources")
 	}
-	if fa.count("POST /pullzone/2/edgerules") != 2 || fa.count("POST /pullzone/2/addHostname") != 1 || fa.count("PUT /dnszone") != 1 {
+	if fa.count("POST /pullzone/2/edgerules") != 2+len(securityHeaders)+2 || fa.count("POST /pullzone/2/addHostname") != 1 || fa.count("PUT /dnszone") != 1 {
 		t.Errorf("second run repeated one-time steps: %v", fa.calls)
 	}
 	_ = creates

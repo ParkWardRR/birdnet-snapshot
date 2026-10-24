@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -14,11 +15,16 @@ import (
 	"time"
 )
 
+// freshDetections is how many of the newest detections get a clip attempt
+// even if their record had no clip name yet when it was recorded.
+const freshDetections = 40
+
 // detection is the part of a detection record needed to decide on its clip.
 type detection struct {
 	ID       int64
 	ClipName string
 	Source   string // source id + display name, lowercased
+	Sci      string // scientific name
 }
 
 // fetchClips downloads the audio clip of every detection the crawl saw, since
@@ -30,15 +36,25 @@ func fetchClips(ctx context.Context, c config, st *store) error {
 	if err := fetchDetails(ctx, c, st, dets); err != nil {
 		return err
 	}
-	if err := retryMedia(ctx, c, st); err != nil {
-		return err
+	// The newest detections may have had no clip yet when the crawl recorded
+	// them; by now (minutes later) BirdNET-Go has usually written it.
+	newest := make([]int64, 0, len(dets))
+	for id := range dets {
+		newest = append(newest, id)
 	}
-	purgeAudio(c, st, st.detections())
+	sort.Slice(newest, func(i, j int) bool { return newest[i] > newest[j] })
+	if len(newest) > freshDetections {
+		newest = newest[:freshDetections]
+	}
+	fresh := map[int64]bool{}
+	for _, id := range newest {
+		fresh[id] = true
+	}
 
 	ids := make([]int64, 0, len(dets))
 	skipped := 0
 	for id, d := range dets {
-		if c.NoAudio || d.ClipName == "" || skipSource(d.Source, c.SkipAudio) {
+		if c.NoAudio || (d.ClipName == "" && !fresh[id]) || skipSource(d.Source, c.SkipAudio) {
 			skipped++
 			continue
 		}
@@ -82,7 +98,16 @@ func fetchClips(ctx context.Context, c config, st *store) error {
 	wg.Wait()
 	log.Printf("clips: %d detections, %d fetched, %d failed, %d skipped (no clip or private source)",
 		len(dets), fetched, failed, skipped)
-	return ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Last, so media that was still being written during the crawl has had
+	// the most time to appear; then drop clips that must not be published.
+	if err := retryMedia(ctx, c, st); err != nil {
+		return err
+	}
+	purgeAudio(c, st, st.detections())
+	return nil
 }
 
 // purgeAudio removes clips the browser recorded during the crawl (a page that
@@ -133,7 +158,11 @@ func fetchDetails(ctx context.Context, c config, st *store, dets map[int64]detec
 	)
 	for _, id := range ids {
 		for _, t := range st.templates {
+			if strings.Contains(t, "{sci}") && dets[id].Sci == "" {
+				continue
+			}
 			k := strings.ReplaceAll(t, "{id}", fmt.Sprint(id))
+			k = strings.ReplaceAll(k, "{sci}", encodeURIComponent(dets[id].Sci))
 			if st.has(k) {
 				continue
 			}
@@ -169,6 +198,7 @@ func collectDetections(v any, out map[int64]detection) {
 		if id, ok := t["id"].(float64); ok {
 			if clip, ok := t["clipName"].(string); ok {
 				d := detection{ID: int64(id), ClipName: clip}
+				d.Sci, _ = t["scientificName"].(string)
 				if src, ok := t["source"].(map[string]any); ok {
 					s1, _ := src["id"].(string)
 					s2, _ := src["displayName"].(string)
@@ -274,4 +304,10 @@ func retryMedia(ctx context.Context, c config, st *store) error {
 	wg.Wait()
 	log.Printf("media: %d of %d missing spectrograms/clips recovered", fetched, len(want))
 	return ctx.Err()
+}
+
+// encodeURIComponent escapes s the way the browser does in the UI's URLs
+// ("Corvus corax" -> "Corvus%20corax").
+func encodeURIComponent(s string) string {
+	return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
 }

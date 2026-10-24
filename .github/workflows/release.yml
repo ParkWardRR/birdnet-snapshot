@@ -9,94 +9,31 @@ permissions:
   packages: write
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    env:
-      CHROME_NO_SANDBOX: "true"
+  release:
+    runs-on: [self-hosted, cairn]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      - run: go vet ./...
-      - run: go test -race -count=1 ./...
-
-  binaries:
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      - name: build
-        run: |
-          set -eu
-          VERSION=${GITHUB_REF_NAME}
-          mkdir -p dist
-          for target in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64; do
-            os=${target%/*}; arch=${target#*/}
-            name=birdnet-snapshot_${VERSION#v}_${os}_${arch}
-            bin=birdnet-snapshot; [ "$os" = windows ] && bin=birdnet-snapshot.exe
-            mkdir -p "build/$name"
-            GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath \
-              -ldflags "-s -w -X main.version=${VERSION}" -o "build/$name/$bin" .
-            cp README.md LICENSE.md CHANGELOG.md "build/$name/"
-            cp -r deploy "build/$name/"
-            if [ "$os" = windows ]; then
-              (cd build && zip -qr "../dist/$name.zip" "$name")
-            else
-              tar -C build -czf "dist/$name.tar.gz" "$name"
-            fi
-          done
-          (cd dist && sha256sum -- * > SHA256SUMS)
-      - name: release notes
-        run: |
-          # The CHANGELOG section for this tag, up to the next "## " heading.
-          awk -v tag="${GITHUB_REF_NAME#v}" '
-            $0 ~ "^## \\[?v?" tag "[] ]" { on=1; next }
-            on && /^## / { exit }
-            on { print }
-          ' CHANGELOG.md > notes.md
-          test -s notes.md || echo "See CHANGELOG.md." > notes.md
-          cat >> notes.md <<NOTES
-
-          ### Container image
-
-          \`\`\`sh
-          docker pull ghcr.io/parkwardrr/birdnet-snapshot:${GITHUB_REF_NAME#v}
-          \`\`\`
-          NOTES
-      - name: publish
+      - uses: actions/checkout@v4
+      - name: Runner policy
+        run: tests/check-runners.sh
+      - name: Toolchain
+        run: scripts/ci-setup.sh
+      - name: Tests
+        run: go vet ./... && go test -race -count=1 ./...
+      - name: Binaries
+        run: scripts/build-release.sh "$GITHUB_REF_NAME" dist
+      - name: Release notes
+        run: scripts/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
+      - name: GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag
-
-  image:
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-      - id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ghcr.io/parkwardrr/birdnet-snapshot
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
-      - uses: docker/build-push-action@v7
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: VERSION=${{ github.ref_name }}
+        run: gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip dist/SHA256SUMS --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
+      - name: Container image (linux/amd64 + linux/arm64) to ghcr.io
+        env:
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: |
+          cd tools/mkimage
+          go run . -binary-dir "$GITHUB_WORKSPACE/build" -version "$GITHUB_REF_NAME" \
+            -repo ghcr.io/parkwardrr/birdnet-snapshot -push

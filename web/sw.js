@@ -7,6 +7,8 @@
 
 const SNAPSHOT = '/snapshot.json';
 const RECHECK_MS = 60 * 1000;
+// Used until a snapshot.json that lists them is loaded (older snapshots).
+const DEFAULT_PROTECTED = ['/api/v2/settings', '/api/v2/system', '/api/v2/auth', '/api/v2/streams', '/api/v2/notifications', '/api/v2/alerts'];
 
 let state = null; // { info, entries }
 let lastCheck = 0;
@@ -32,7 +34,8 @@ async function load(force) {
   return loading;
 }
 
-self.addEventListener('install', () => self.skipWaiting());
+// Load the manifest while installing, so the first API call doesn't wait for it.
+self.addEventListener('install', (e) => e.waitUntil(load(true).then(() => self.skipWaiting())));
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 self.addEventListener('message', (e) => {
   if (e.data === 'claim') self.clients.claim();
@@ -68,10 +71,20 @@ async function answer(req, url, api) {
   }
   const entry = st && st.entries[key(url)];
   if (entry) {
-    const r = await fetch('/_snap/' + entry.f);
-    if (r.ok) return respond(req, await r.blob(), entry.t);
+    try {
+      const r = await fetch('/_snap/' + entry.f);
+      if (r.ok) return respond(req, await r.blob(), entry.t);
+    } catch (e) {
+      return json(503, { error: 'unavailable', message: 'The snapshot could not be loaded. Check your connection.' });
+    }
   }
   if (!api) return fetch(url.pathname); // query string on a static file: ignore it
+  // Endpoints a logged-out guest of a real server gets 401 for: answer the
+  // same, so the UI treats it as "not signed in" and stays quiet.
+  const prot = (st && st.info.protected) || DEFAULT_PROTECTED;
+  if (prot.some((p) => url.pathname === p || url.pathname.startsWith(p + '/'))) {
+    return json(401, { error: 'unauthorized', message: 'Sign-in required.' });
+  }
   return json(404, { error: 'not_in_snapshot', message: 'Not included in this snapshot.' });
 }
 

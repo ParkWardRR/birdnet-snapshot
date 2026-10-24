@@ -1,0 +1,25 @@
+# Loads a published snapshot in Chromium, Firefox and WebKit every 6 hours.
+# Set the repository variable SITE_URL to enable it.
+name: Site check
+
+on:
+  schedule:
+    - cron: "37 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browsers:
+    runs-on: [self-hosted, cairn]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        if: vars.SITE_URL != ''
+        run: scripts/ci-setup.sh
+      - name: Chromium, Firefox and WebKit
+        if: vars.SITE_URL != ''
+        run: cd tests/browsers && go run . -url "${{ vars.SITE_URL }}"
