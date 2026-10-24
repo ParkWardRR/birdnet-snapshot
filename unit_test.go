@@ -478,18 +478,25 @@ func TestPurgeAudio(t *testing.T) {
 	for _, k := range []string{"/api/v2/audio/1", "/api/v2/audio/2?t=5", "/api/v2/audio/3", "/api/v2/audio/x"} {
 		st.put(&capture{Key: k, MIME: "audio/flac", Body: []byte("x")})
 	}
+	st.put(&capture{Key: "/api/v2/spectrogram/2?size=md&raw=true", MIME: "image/png", Body: []byte("p")})
+	st.put(&capture{Key: "/api/v2/spectrogram/1?size=lg", MIME: "image/png", Body: []byte("p")})
+	st.put(&capture{Key: "/api/v2/detections/recent", MIME: "application/json",
+		Body: []byte(`[{"id":1,"clipName":"a.flac"},{"id":2,"clipName":"b.flac","nested":{"id":2,"clipName":"b.flac"}}]`)})
 	dets := map[int64]detection{
 		1: {ID: 1, ClipName: "a", Source: "rtsp yard"},
 		2: {ID: 2, ClipName: "b", Source: "rtsp doorbell"},
 		// 3 unknown
 	}
 	purgeAudio(config{SkipAudio: []string{"doorbell"}}, st, dets)
-	if len(st.items) != 1 || !st.has("/api/v2/audio/1") {
-		t.Errorf("want only clip 1 kept, got %v", sortedKeys(st.items))
+	if !st.has("/api/v2/audio/1") || !st.has("/api/v2/spectrogram/1?size=lg") || len(st.items) != 3 {
+		t.Errorf("want only detection 1's media and the list kept, got %v", sortedKeys(st.items))
+	}
+	if got := string(st.items["/api/v2/detections/recent"].Body); got != `[{"clipName":"a.flac","id":1},{"clipName":"","id":2,"nested":{"clipName":"","id":2}}]` {
+		t.Errorf("clipName of the withheld detection not blanked: %s", got)
 	}
 	purgeAudio(config{NoAudio: true}, st, dets)
-	if len(st.items) != 0 {
-		t.Errorf("NoAudio must drop every clip, got %v", sortedKeys(st.items))
+	if len(st.items) != 1 {
+		t.Errorf("NoAudio must drop every clip and spectrogram, got %v", sortedKeys(st.items))
 	}
 }
 

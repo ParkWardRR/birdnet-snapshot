@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -110,29 +111,77 @@ func fetchClips(ctx context.Context, c config, st *store) error {
 	return nil
 }
 
-// purgeAudio removes clips the browser recorded during the crawl (a page that
-// preloads audio) that must not be published: every clip with c.NoAudio, and
-// otherwise clips whose detection is from a skipped or unknown source.
+// mediaRefRe matches recorded media of one detection: its clip and every
+// spectrogram (any size) or spectrogram status.
+var mediaRefRe = regexp.MustCompile(`^/api/v2/(audio|spectrogram)/([^/?]+)(/status)?(\?.*)?$`)
+
+// purgeAudio withholds the recording of every detection whose clip must not
+// be published (c.NoAudio, a source in c.SkipAudio, or an unknown source):
+// its clip and its spectrograms (a picture of the same audio, which can be
+// turned back into rough sound) are dropped, including any the browser
+// preloaded, and its clipName is blanked in every recorded response so the UI
+// shows the detection without a player instead of an error.
 func purgeAudio(c config, st *store, dets map[int64]detection) {
+	withheld := func(id int64) bool {
+		d, known := dets[id]
+		return c.NoAudio || !known || skipSource(d.Source, c.SkipAudio)
+	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	removed := 0
-	for k := range st.items {
+	removed, blanked := 0, 0
+	for k, it := range st.items {
 		p, _, _ := strings.Cut(k, "?")
-		idStr, ok := strings.CutPrefix(p, "/api/v2/audio/")
-		if !ok {
+		if m := mediaRefRe.FindStringSubmatch(k); m != nil {
+			if id, err := strconv.ParseInt(m[2], 10, 64); err != nil || withheld(id) {
+				delete(st.items, k)
+				removed++
+			}
 			continue
 		}
-		id, err := strconv.ParseInt(idStr, 10, 64)
-		d, known := dets[id]
-		if c.NoAudio || err != nil || !known || skipSource(d.Source, c.SkipAudio) {
-			delete(st.items, k)
-			removed++
+		if !strings.HasPrefix(p, "/api/") || !isJSON(it.MIME) || !strings.Contains(string(it.Body), `"clipName"`) {
+			continue
+		}
+		var v any
+		dec := json.NewDecoder(strings.NewReader(string(it.Body)))
+		dec.UseNumber()
+		if dec.Decode(&v) != nil {
+			continue
+		}
+		if n := blankClips(v, withheld); n > 0 {
+			if b, err := json.Marshal(v); err == nil {
+				it.Body = b
+				blanked += n
+			}
 		}
 	}
-	if removed > 0 {
-		log.Printf("clips: dropped %d recorded clip(s) from skipped or unknown sources", removed)
+	if removed+blanked > 0 {
+		log.Printf("clips: withheld %d recorded clip/spectrogram file(s), hid %d clip reference(s) from skipped or unknown sources", removed, blanked)
 	}
+}
+
+// blankClips empties clipName on every detection record in v that withheld
+// matches, and returns how many it changed.
+func blankClips(v any, withheld func(int64) bool) int {
+	n := 0
+	switch t := v.(type) {
+	case []any:
+		for _, e := range t {
+			n += blankClips(e, withheld)
+		}
+	case map[string]any:
+		if num, ok := t["id"].(json.Number); ok {
+			if clip, ok := t["clipName"].(string); ok && clip != "" {
+				if id, err := num.Int64(); err == nil && withheld(id) {
+					t["clipName"] = ""
+					n++
+				}
+			}
+		}
+		for _, e := range t {
+			n += blankClips(e, withheld)
+		}
+	}
+	return n
 }
 
 // fetchDetails fills in the detail-page API URLs (st.templates) for every

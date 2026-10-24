@@ -232,6 +232,11 @@ func TestEndToEnd(t *testing.T) {
 			t.Errorf("manifest has %s", k)
 		}
 	}
+	for k := range m.Entries {
+		if strings.HasPrefix(k, "/api/v2/spectrogram/32") {
+			t.Errorf("spectrogram of the doorbell detection published: %s", k)
+		}
+	}
 	cfgFile, _ := os.ReadFile(filepath.Join(out, "_snap", m.Entries["/api/v2/app/config"].F))
 	if !strings.Contains(string(cfgFile), `"accessAllowed":false`) || strings.Contains(string(cfgFile), "tok") {
 		t.Errorf("app/config not rewritten to guest: %s", cfgFile)
@@ -239,6 +244,9 @@ func TestEndToEnd(t *testing.T) {
 	recent, _ := os.ReadFile(filepath.Join(out, "_snap", m.Entries["/api/v2/detections/recent?limit=5&date="+today].F))
 	if strings.Contains(string(recent), "nvr.lan") || strings.Contains(string(recent), "pw@") {
 		t.Errorf("stream URL published: %s", recent)
+	}
+	if !strings.Contains(string(recent), `"clipName":"","commonName":"House Finch"`) {
+		t.Errorf("doorbell detection should have its clipName blanked: %s", recent)
 	}
 
 	// Serve the snapshot with the BirdNET-Go server gone, and browse it.

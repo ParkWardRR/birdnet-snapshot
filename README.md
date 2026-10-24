@@ -218,7 +218,7 @@ Every flag has an environment variable, handy for containers and systemd `Enviro
 | `-max-pages` | `SNAPSHOT_MAX_PAGES` | `150` | page visit budget (seed pages always count) |
 | `-max-clips` | `SNAPSHOT_MAX_CLIPS` | `1500` | detail pages and clips, newest first |
 | `-skip-audio` | `SKIP_AUDIO_SOURCES` | | comma-separated source names whose clips are never published |
-| `-no-audio` | `SNAPSHOT_NO_AUDIO` | `false` | publish no clips at all |
+| `-no-audio` | `SNAPSHOT_NO_AUDIO` | `false` | publish no clips or spectrograms at all |
 | `-routes` | `SNAPSHOT_ROUTES` | | extra UI routes to record |
 | `-no-mobile` | `SNAPSHOT_NO_MOBILE` | `false` | skip the phone-layout pass |
 | `-label` | `SNAPSHOT_LABEL` | `Snapshot` | text of the corner pill |
@@ -246,7 +246,7 @@ Every flag has an environment variable, handy for containers and systemd `Enviro
 | **What is published** | Only what a logged-out guest of your BirdNET-Go would see. The crawler rewrites `app/config` to the guest view even if your server has no auth |
 | **Never requested** | `/api/v2/settings` (except dashboard display prefs), `system`, `auth`, `streams`, `notifications`, `alerts`, `backup`, `logs`, `integrations`, `import`, `models`, `debug`, `support`, and every SSE stream. Writes are failed inside Chrome before they leave it; the only exception is `POST /api/v2/spectrogram/<id>/generate`, which a guest's browser sends too |
 | **Location** | BirdNET-Go puts the station's coordinates in some responses (species rarity, for one). `-location hide` (default) removes every `lat`/`lon`/`latitude`/`longitude` field; `coarse` rounds to whole degrees (~100 km); `keep` leaves them. Sunrise/sunset times and the species list still hint at a region, as on any bird site |
-| **Audio** | Clips from sources matching `-skip-audio` and clips whose source is unknown are dropped, including any the browser preloaded. `-no-audio` drops all of them |
+| **Audio** | For detections from sources matching `-skip-audio` (or of unknown source) the clip **and the spectrograms** are withheld (a spectrogram is a picture of the audio and can be turned back into rough sound), including anything the browser preloaded, and their `clipName` is blanked so the UI shows them without a player. `-no-audio` does this for every detection |
 | **Stream URLs** | `rtsp://user:pass@host/path` in any response becomes `stream/path` |
 | **Your own secrets** | `-redact 'home\.lan,secret-word'` replaces matches in recorded data. `-forbid 'home\.lan,192\.168\.[0-9]+\.[0-9]+'` fails the build if any published file still contains a match |
 | **Content-Security-Policy** | `default-src 'self'`, scripts from the site plus the shell's inline scripts by SHA-256, no third-party requests, no frames, plugins or form posts (`-no-csp` to drop it) |
