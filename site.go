@@ -42,9 +42,9 @@ type snapshotInfo struct {
 	ServerToday string   `json:"serverToday"` // YYYY-MM-DD in the server's zone
 	Pages       int      `json:"pages"`
 	Entries     int      `json:"entries"`
-	Label       string   `json:"label"`     // text of the snapshot pill
-	Version     string   `json:"version"`   // birdnet-snapshot version that built it
-	Protected   []string `json:"protected"` // API prefixes the service worker answers with 401, like a server does for guests
+	Label       string   `json:"label"`              // text of the snapshot pill
+	Version     string   `json:"version"`            // birdnet-snapshot version that built it
+	Protected   []string `json:"protected"`          // API prefixes the service worker answers with 401, like a server does for guests
 	Previous    string   `json:"previous,omitempty"` // manifest of the snapshot this one replaced, set by deploy
 }
 
