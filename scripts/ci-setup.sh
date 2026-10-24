@@ -33,6 +33,8 @@ node_dir="$cache/node-v$NODE_VERSION-linux-x64"
 if [ ! -x "$node_dir/bin/node" ]; then
   curl -fsSL "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-x64.tar.xz" | tar -xJ -C "$cache"
 fi
+# npm runs "env node": put this Node ahead of the runner image's old one.
+export PATH="$node_dir/bin:$PATH"
 
 # playwright-go driver: <dir>/package/cli.js run by PLAYWRIGHT_NODEJS_PATH.
 driver="$cache/ms-playwright-go/$PW_VERSION"
