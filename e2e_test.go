@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"image"
+	"image/color"
+	"image/png"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -67,8 +71,14 @@ if (m) {
 app.dataset.ready = '1';
 `
 
-// A 1x1 PNG.
-var pngPixel = []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82")
+// A valid 1x1 PNG (Firefox rejects hand-made ones with bad checksums).
+var pngPixel = func() []byte {
+	var b bytes.Buffer
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.RGBA{16, 185, 129, 255})
+	_ = png.Encode(&b, img)
+	return b.Bytes()
+}()
 
 func (f *fakeBirdNET) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()

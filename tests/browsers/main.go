@@ -45,6 +45,10 @@ func severity(f finding) string {
 		return "fail"
 	case f.Kind == "console error" && strings.Contains(f.Detail, "status of 401"):
 		return ""
+	case f.Kind == "HTTP 403" && !strings.HasPrefix(f.Detail, "GET "):
+		return "" // writes are refused by design
+	case f.Kind == "console error" && strings.Contains(f.Detail, "status of 403"):
+		return ""
 	case f.Kind == "HTTP 404" && strings.Contains(f.Detail, " /api/"):
 		return "warn"
 	case f.Kind == "console error" && strings.Contains(f.Detail, "status of 404"):
