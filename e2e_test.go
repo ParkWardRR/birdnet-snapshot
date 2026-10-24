@@ -3,11 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
