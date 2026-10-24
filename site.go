@@ -24,8 +24,8 @@ var webFS embed.FS
 
 // manifestEntry points a recorded URL at its content-addressed body.
 type manifestEntry struct {
-	F string `json:"f"` // file name under /_snap/
-	T string `json:"t"` // content type
+	F string `json:"f"`           // file name under /_snap/
+	T string `json:"t,omitempty"` // content type, only when the extension does not imply it (sw.js TYPES)
 }
 
 type manifest struct {
@@ -135,8 +135,13 @@ func buildSite(c config, st *store, started time.Time) (*buildResult, error) {
 			res.Clips++
 		}
 		sum := sha256.Sum256(body)
-		name := hex.EncodeToString(sum[:16]) + extFor(it.MIME)
-		m.Entries[k] = manifestEntry{F: name, T: it.MIME}
+		ext := extFor(it.MIME)
+		name := hex.EncodeToString(sum[:10]) + ext // 80 bits: no collisions at this scale, smaller manifest
+		e := manifestEntry{F: name}
+		if ext == ".bin" {
+			e.T = it.MIME
+		}
+		m.Entries[k] = e
 		if !written[name] {
 			written[name] = true
 			if err := write("_snap/"+name, body); err != nil {

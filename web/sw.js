@@ -82,7 +82,7 @@ async function answer(req, url, api) {
   if (entry) {
     try {
       const r = await fetch('/_snap/' + entry.f);
-      if (r.ok) return respond(req, await r.blob(), entry.t);
+      if (r.ok) return respond(req, await r.blob(), entry.t || TYPES[entry.f.slice(entry.f.lastIndexOf('.') + 1)] || 'application/octet-stream');
     } catch (e) {
       return json(503, { error: 'unavailable', message: 'The snapshot could not be loaded. Check your connection.' });
     }
@@ -119,6 +119,14 @@ function respond(req, blob, type) {
     },
   });
 }
+
+// Content types by extension; the manifest stores a type only for other files
+// (extFor in site.go must agree).
+const TYPES = {
+  json: 'application/json', png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp', svg: 'image/svg+xml',
+  avif: 'image/avif', gif: 'image/gif', flac: 'audio/flac', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg',
+  m4a: 'audio/mp4', txt: 'text/plain', css: 'text/css', html: 'text/html', js: 'text/javascript',
+};
 
 // Cache busters the UI appends; must match volatileParams in crawl.go.
 const VOLATILE = new Set(['t', 'cache', 'retry']);

@@ -335,7 +335,7 @@ func TestBuildSite(t *testing.T) {
 	if m.Entries["/api/v2/app/config"].F != m.Entries["/api/v2/detections/7"].F {
 		t.Error("identical bodies should share one content-addressed file")
 	}
-	if e := m.Entries["/api/v2/audio/7"]; !strings.HasSuffix(e.F, ".flac") || e.T != "audio/flac" {
+	if e := m.Entries["/api/v2/audio/7"]; !strings.HasSuffix(e.F, ".flac") || e.T != "" {
 		t.Errorf("bad audio entry %+v", e)
 	}
 	rec, _ := os.ReadFile(filepath.Join(dir, "_snap", m.Entries["/api/v2/detections/recent?limit=5"].F))
@@ -701,5 +701,25 @@ func TestSnapshotListsProtected(t *testing.T) {
 	}
 	if !has["/api/v2/notifications"] || !has["/api/v2/settings"] {
 		t.Errorf("protected list %v", info.Protected)
+	}
+}
+
+// Every extension extFor produces (except .bin, whose type is stored) must
+// have a content type in the service worker's TYPES table.
+func TestServiceWorkerKnowsEveryExtension(t *testing.T) {
+	sw, _ := webFS.ReadFile("web/sw.js")
+	m := regexp.MustCompile(`(?s)const TYPES = \{(.*?)\};`).FindSubmatch(sw)
+	if m == nil {
+		t.Fatal("TYPES not found in web/sw.js")
+	}
+	known := map[string]bool{}
+	for _, km := range regexp.MustCompile(`(\w+):\s*'`).FindAllSubmatch(m[1], -1) {
+		known["."+string(km[1])] = true
+	}
+	for _, mime := range []string{"application/json", "image/webp", "image/png", "image/jpeg", "image/svg+xml", "image/avif",
+		"image/gif", "audio/flac", "audio/mpeg", "audio/wav", "audio/ogg", "audio/mp4", "text/plain", "text/css", "text/html", "text/javascript"} {
+		if ext := extFor(mime); ext != ".bin" && !known[ext] {
+			t.Errorf("extFor(%q) = %s, missing from sw.js TYPES", mime, ext)
+		}
 	}
 }
