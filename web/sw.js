@@ -11,6 +11,7 @@ const RECHECK_MS = 60 * 1000;
 const DEFAULT_PROTECTED = ['/api/v2/settings', '/api/v2/system', '/api/v2/auth', '/api/v2/streams', '/api/v2/notifications', '/api/v2/alerts'];
 
 let state = null; // { info, entries }
+let previous = null; // { manifest, entries } of the snapshot before, for pages still running its code
 let lastCheck = 0;
 let loading = null;
 
@@ -51,7 +52,13 @@ self.addEventListener('fetch', (e) => {
   }
   const api = url.pathname.startsWith('/api/');
   if (!api && !url.search) return;
-  e.respondWith(answer(e.request, url, api));
+  // Always answer: a rejected promise here is a network error in the page
+  // (Firefox logs it as "ServiceWorker encountered an unexpected error").
+  e.respondWith(
+    answer(e.request, url, api).catch(() =>
+      json(503, { error: 'unavailable', message: 'The snapshot could not be loaded. Check your connection.' })
+    )
+  );
 });
 
 async function answer(req, url, api) {
@@ -69,7 +76,9 @@ async function answer(req, url, api) {
       ? json(200, { data: { status: 'exists', queuePosition: 0 } })
       : json(404, { error: 'not_in_snapshot', message: 'Spectrogram not included in this snapshot.' });
   }
-  const entry = st && st.entries[key(url)];
+  const k = key(url);
+  let entry = st && st.entries[k];
+  if (!entry && st && st.info.previous) entry = (await loadPrevious(st.info.previous))[k];
   if (entry) {
     try {
       const r = await fetch('/_snap/' + entry.f);
@@ -78,7 +87,7 @@ async function answer(req, url, api) {
       return json(503, { error: 'unavailable', message: 'The snapshot could not be loaded. Check your connection.' });
     }
   }
-  if (!api) return fetch(url.pathname); // query string on a static file: ignore it
+  if (!api) return fetch(url.pathname); // query string on a static file: ignore it (errors caught above)
   // Endpoints a logged-out guest of a real server gets 401 for: answer the
   // same, so the UI treats it as "not signed in" and stays quiet.
   const prot = (st && st.info.protected) || DEFAULT_PROTECTED;
@@ -121,6 +130,20 @@ function key(url) {
     .split('&')
     .filter((p) => p !== '' && !VOLATILE.has(p.split('=')[0]));
   return keep.length ? url.pathname + '?' + keep.join('&') : url.pathname;
+}
+
+// loadPrevious returns the entries of the snapshot this one replaced. A page
+// that loaded the previous build (the edge caches the shell for a minute after
+// a BirdNET-Go upgrade) asks for what that build recorded.
+async function loadPrevious(manifest) {
+  if (previous && previous.manifest === manifest) return previous.entries;
+  try {
+    const m = await (await fetch(manifest)).json();
+    previous = { manifest, entries: m.entries };
+  } catch (e) {
+    previous = { manifest, entries: {} };
+  }
+  return previous.entries;
 }
 
 function json(status, body) {

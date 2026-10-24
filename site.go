@@ -45,6 +45,7 @@ type snapshotInfo struct {
 	Label       string   `json:"label"`     // text of the snapshot pill
 	Version     string   `json:"version"`   // birdnet-snapshot version that built it
 	Protected   []string `json:"protected"` // API prefixes the service worker answers with 401, like a server does for guests
+	Previous    string   `json:"previous,omitempty"` // manifest of the snapshot this one replaced, set by deploy
 }
 
 // buildResult summarises a build for logs and metrics.

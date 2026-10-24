@@ -246,12 +246,19 @@ func checkDOM(page playwright.Page, add func(kind, detail string)) {
 				out.toasts.push(t.slice(0, 120) + (ctx ? ' — in: ' + ctx : ''));
 			}
 		}
+		const checks = [];
 		for (const img of document.images) {
 			if (img.complete && img.naturalWidth === 0 && img.src && !img.src.startsWith('data:')) {
-				out.broken.push(img.currentSrc || img.src);
+				const src = img.currentSrc || img.src;
+				// Firefox reports width 0 for SVGs without intrinsic size; check the bytes instead.
+				if (/\.svg(\?|$)/.test(src)) {
+					checks.push(fetch(src).then(r => { if (!r.ok) out.broken.push(src); }, () => out.broken.push(src)));
+				} else {
+					out.broken.push(src);
+				}
 			}
 		}
-		return out;
+		return Promise.all(checks).then(() => out);
 	}`)
 	if err != nil {
 		add("evaluate", err.Error())

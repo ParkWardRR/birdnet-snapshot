@@ -110,6 +110,18 @@ func deploy(ctx context.Context, c config) (*deployResult, error) {
 		for _, f := range files {
 			keep[f] = true
 		}
+		// Pages still running the previous build (an edge-cached shell for a
+		// minute after a BirdNET-Go upgrade, or a visitor mid-session) ask for
+		// what that build recorded; the service worker falls back to it.
+		if prev.Manifest != "" && prev.Manifest != next.Manifest {
+			next.Previous = prev.Manifest
+			if err := writeSnapshotInfo(c.Out, next); err != nil {
+				return nil, err
+			}
+			if local["snapshot.json"], err = fileSHA(filepath.Join(c.Out, "snapshot.json")); err != nil {
+				return nil, err
+			}
+		}
 		// Shrink guard: a crawl that lost most of its data (server restarting,
 		// half the UI failing) must not replace a good snapshot.
 		if c.MaxShrink > 0 && !c.Force && prev.Entries > 0 &&
@@ -327,4 +339,12 @@ func fileSHA(p string) (string, error) {
 		return "", err
 	}
 	return strings.ToUpper(hex.EncodeToString(h.Sum(nil))), nil
+}
+
+func writeSnapshotInfo(dir string, info snapshotInfo) error {
+	b, err := json.MarshalIndent(info, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "snapshot.json"), b, 0o644)
 }

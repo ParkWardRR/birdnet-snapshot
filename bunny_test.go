@@ -475,3 +475,34 @@ func TestEnsureCNAMERefusesToClobber(t *testing.T) {
 		t.Errorf("want apex refusal, got %v", err)
 	}
 }
+
+func TestDeployRecordsPreviousManifest(t *testing.T) {
+	f, srv := newFakeStorage(t)
+	dir := filepath.Join(t.TempDir(), "site")
+	build := func(body string) snapshotInfo {
+		st := newTestStore()
+		st.index = []byte(testShell)
+		st.put(&capture{Key: "/api/v2/app/config", MIME: "application/json", Body: []byte(body)})
+		if _, err := buildSite(config{Out: dir}, st, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		var info snapshotInfo
+		readJSON(t, filepath.Join(dir, "snapshot.json"), &info)
+		if _, err := deploy(context.Background(), deployConfig(srv, dir)); err != nil {
+			t.Fatal(err)
+		}
+		return info
+	}
+	first := build(`{"v":1}`)
+	build(`{"v":2}`)
+	var live snapshotInfo
+	if err := json.Unmarshal(f.files["snapshot.json"], &live); err != nil {
+		t.Fatal(err)
+	}
+	if live.Previous != first.Manifest {
+		t.Errorf("live snapshot.json previous = %q, want the first manifest %q", live.Previous, first.Manifest)
+	}
+	if _, ok := f.files[strings.TrimPrefix(first.Manifest, "/")]; !ok {
+		t.Error("the previous manifest must stay published for one generation")
+	}
+}
