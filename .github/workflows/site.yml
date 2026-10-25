@@ -1,5 +1,6 @@
 # Loads a published snapshot in Chromium, Firefox and WebKit every 6 hours.
-# Set the repository variable SITE_URL to enable it.
+# Set the repository secret SITE_URL to enable it (a secret, so the URL is
+# masked in the public logs).
 name: Site check
 
 on:
@@ -15,11 +16,13 @@ jobs:
     runs-on: [self-hosted, cairn]
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     timeout-minutes: 30
+    env:
+      SITE_URL: ${{ secrets.SITE_URL }}
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain
-        if: vars.SITE_URL != ''
+        if: env.SITE_URL != ''
         run: scripts/ci-setup.sh
       - name: Chromium, Firefox and WebKit
-        if: vars.SITE_URL != ''
-        run: cd tests/browsers && go run . -url "${{ vars.SITE_URL }}"
+        if: env.SITE_URL != ''
+        run: cd tests/browsers && go run . -url "$SITE_URL"
