@@ -61,6 +61,7 @@ if (m) {
   await new Promise(r => { const i = document.getElementById('spec'); i.onload = i.onerror = r; });
   window.__specWidth = document.getElementById('spec').naturalWidth;
   window.__audio = await fetch('/api/v2/audio/' + d.id + '?t=' + Date.now()).then(r => r.status);
+  window.__range = await fetch('/api/v2/audio/' + d.id, { headers: { Range: 'bytes=0-3' } }).then(async r => r.status + ':' + (await r.text()));
 } else {
   const date = new URLSearchParams(location.search).get('date') || 'none';
   const list = await (await fetch('/api/v2/detections/recent?limit=5&date=' + date + '&t=' + Date.now())).json();
@@ -335,6 +336,11 @@ func TestEndToEnd(t *testing.T) {
 	}
 	if fmt.Sprint(specStatus) != "exists" || fmt.Sprint(missingStatus) != "404" {
 		t.Errorf("spectrogram status: recorded one %v (want exists), missing one %v (want 404)", specStatus, missingStatus)
+	}
+	var rng any
+	_ = chromedp.Run(tab, chromedp.Evaluate(`window.__range`, &rng))
+	if fmt.Sprint(rng) != "206:fLaC" {
+		t.Errorf("byte-range request for a clip: got %v, want a real 206 with the first 4 bytes", rng)
 	}
 	if title != "Black Phoebe" || specWidth != 1 || audio != 200 {
 		t.Errorf("detail page: title %q, spectrogram width %v, audio %v", title, specWidth, audio)

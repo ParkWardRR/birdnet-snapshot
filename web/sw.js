@@ -81,6 +81,10 @@ async function answer(req, url, api) {
   if (!entry && st && st.info.previous) entry = (await loadPrevious(st.info.previous))[k];
   if (entry) {
     try {
+      // Byte ranges (audio): let the CDN answer with a real 206. Firefox rejects
+      // partial responses a worker builds itself for media elements.
+      const range = req.headers.get('Range');
+      if (range) return await fetch('/_snap/' + entry.f, { headers: { Range: range }, signal: req.signal });
       const r = await fetch('/_snap/' + entry.f, { signal: req.signal }); // stop if the page gives up
       if (r.ok) return respond(req, await r.blob(), entry.t || TYPES[entry.f.slice(entry.f.lastIndexOf('.') + 1)] || 'application/octet-stream');
     } catch (e) {
@@ -97,26 +101,12 @@ async function answer(req, url, api) {
   return json(404, { error: 'not_in_snapshot', message: 'Not included in this snapshot.' });
 }
 
-// respond serves a body, honouring Range so Safari will play audio clips.
+// respond serves a recorded body. Byte-range requests never get here: the CDN
+// answers those itself (see answer).
 function respond(req, blob, type) {
-  const headers = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' };
-  const range = req.headers.get('Range');
-  const m = range && /bytes=(\d*)-(\d*)/.exec(range);
-  if (!m) return new Response(blob, { status: 200, headers: { ...headers, 'Content-Length': String(blob.size) } });
-  let start = m[1] === '' ? blob.size - Number(m[2]) : Number(m[1]);
-  let end = m[1] !== '' && m[2] !== '' ? Number(m[2]) : blob.size - 1;
-  start = Math.max(0, start);
-  end = Math.min(end, blob.size - 1);
-  if (start > end) {
-    return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${blob.size}` } });
-  }
-  return new Response(blob.slice(start, end + 1), {
-    status: 206,
-    headers: {
-      ...headers,
-      'Content-Range': `bytes ${start}-${end}/${blob.size}`,
-      'Content-Length': String(end - start + 1),
-    },
+  return new Response(blob, {
+    status: 200,
+    headers: { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Length': String(blob.size), 'Cache-Control': 'no-store' },
   });
 }
 

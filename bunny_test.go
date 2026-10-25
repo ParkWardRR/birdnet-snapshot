@@ -425,7 +425,7 @@ func TestBunnySetupIsIdempotent(t *testing.T) {
 	if len(fa.storage)+len(fa.pulls) != before || len(fa.dns[0]["Records"].([]any)) != 1 {
 		t.Error("second run duplicated resources")
 	}
-	if fa.count("POST /pullzone/2/edgerules") != 2+len(securityHeaders)+2 || fa.count("POST /pullzone/2/addHostname") != 1 || fa.count("PUT /dnszone") != 1 {
+	if fa.count("POST /pullzone/2/edgerules") != 2+len(securityHeaders)+1+len(contentTypes) || fa.count("POST /pullzone/2/addHostname") != 1 || fa.count("PUT /dnszone") != 1 {
 		t.Errorf("second run repeated one-time steps: %v", fa.calls)
 	}
 	_ = creates

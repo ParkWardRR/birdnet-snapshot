@@ -71,6 +71,7 @@ func main() {
 	pagesFlag := flag.String("pages", "/ui/dashboard,/ui/analytics,/ui/analytics/species,/ui/analytics/trends,/ui/search,/ui/about,@detail", "pages; @detail = a recorded detection with audio")
 	settle := flag.Duration("settle", 4*time.Second, "time to let a page settle after the app starts")
 	strict := flag.Bool("strict", false, "fail on warnings too")
+	debug := flag.Bool("debug", false, "log every aborted request and console message with its resource type")
 	ignore := flag.String("ignore", "", "comma-separated substrings of findings to ignore")
 	flag.Parse()
 	base := strings.TrimRight(*site, "/")
@@ -153,6 +154,9 @@ func main() {
 				msg := ""
 				if f != nil {
 					msg = f.Error()
+				}
+				if *debug {
+					log.Printf("debug %s/%s %s: request failed %s %s [%s] %s", b, v, p, r.Method(), r.URL(), r.ResourceType(), msg)
 				}
 				if strings.Contains(msg, "ERR_ABORTED") || strings.Contains(msg, "NS_BINDING_ABORTED") || strings.Contains(msg, "cancelled") {
 					return // navigations away abort pending requests; not a visitor problem

@@ -480,6 +480,14 @@ var securityHeaders = []struct{ Name, Value string }{
 const ruleBlockMethods = "birdnet-snapshot: read-only, block writes"
 const ruleManifestType = "birdnet-snapshot: web manifest content type"
 
+// contentTypes are set at the edge for extensions storage does not know.
+var contentTypes = []struct{ pattern, typ, desc string }{
+	{"*.webmanifest", "application/manifest+json", ruleManifestType},
+	{"*.flac", "audio/flac", "birdnet-snapshot: content type *.flac"},
+	{"*.ogg", "audio/ogg", "birdnet-snapshot: content type *.ogg"},
+	{"*.m4a", "audio/mp4", "birdnet-snapshot: content type *.m4a"},
+}
+
 // ensureHardening adds the security headers and blocks every method but
 // GET/HEAD at the edge. Existing rules are matched by what they do, and
 // header values are updated in place when they differ.
@@ -507,23 +515,24 @@ func ensureHardening(ctx context.Context, api *bunnyAPI, pz *pullZone) error {
 		}
 		log.Printf("header set at the edge: %s", h.Name)
 	}
-	// Storage serves .webmanifest as application/octet-stream, which nosniff
-	// would make browsers reject.
-	manifestOK := false
+	// Storage serves these as application/octet-stream: nosniff makes browsers
+	// reject the manifest, and audio needs its real type.
+	haveDesc := map[string]bool{}
 	for _, r := range pz.EdgeRules {
-		if r.Description == ruleManifestType {
-			manifestOK = true
-		}
+		haveDesc[r.Description] = true
 	}
-	if !manifestOK {
+	for _, ct := range contentTypes {
+		if haveDesc[ct.desc] {
+			continue
+		}
 		if err := api.do(ctx, http.MethodPost, fmt.Sprintf("/pullzone/%d/edgerules/addOrUpdate", pz.ID), map[string]any{
-			"ActionType": 5, "ActionParameter1": "Content-Type", "ActionParameter2": "application/manifest+json", "Enabled": true,
-			"Description": ruleManifestType, "TriggerMatchingType": 0,
-			"Triggers": []map[string]any{{"Type": 0, "PatternMatchingType": 0, "PatternMatches": []string{"*.webmanifest"}}},
+			"ActionType": 5, "ActionParameter1": "Content-Type", "ActionParameter2": ct.typ, "Enabled": true,
+			"Description": ct.desc, "TriggerMatchingType": 0,
+			"Triggers": []map[string]any{{"Type": 0, "PatternMatchingType": 0, "PatternMatches": []string{ct.pattern}}},
 		}, nil); err != nil {
 			return err
 		}
-		log.Printf("edge rule added: %s", ruleManifestType)
+		log.Printf("edge rule added: %s", ct.desc)
 	}
 	for _, r := range pz.EdgeRules {
 		if r.ActionType == 4 && r.Description == ruleBlockMethods {
