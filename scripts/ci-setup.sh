@@ -9,7 +9,7 @@
 set -euo pipefail
 
 GO_MINOR="$(awk '/^go /{split($2,v,"."); print v[1]"."v[2]}' go.mod)"
-NODE_VERSION="22.12.0"
+NODE_VERSION="22.23.4"   # SvelteKit 3 needs >= 22.17
 PW_VERSION="1.50.1"   # must match tests/browsers' playwright-go (v0.5001.0)
 cache="${RUNNER_TOOL_CACHE:-$HOME/.cache/ci-tools}"
 mkdir -p "$cache"
