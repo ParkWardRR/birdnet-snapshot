@@ -53,6 +53,8 @@ func severity(f finding) string {
 		return "warn"
 	case f.Kind == "console error" && strings.Contains(f.Detail, "status of 404"):
 		return "warn"
+	case f.Kind == "console error" && strings.Contains(f.Detail, "ServiceWorker intercepted the request") && strings.Contains(f.Detail, "Failed to load ‘’"):
+		return "warn" // Firefox: the page aborted a request the worker was answering
 	}
 	return "fail"
 }

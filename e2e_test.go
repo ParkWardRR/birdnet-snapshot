@@ -49,6 +49,8 @@ window.__guest = cfg.security.enabled && !cfg.security.accessAllowed;
 new EventSource('/api/v2/detections/stream');
 fetch('/api/v2/settings/main').catch(() => {});
 window.__write = await fetch('/api/v2/detections/31', { method: 'DELETE' }).then(r => r.status, () => 'blocked');
+// Like the real UI, give up on a request mid-flight (Firefox logs these).
+{ const ac = new AbortController(); fetch('/api/v2/detections/recent?limit=5&date=none', { signal: ac.signal }).catch(() => {}); ac.abort(); }
 const m = location.pathname.match(/^\/ui\/detections\/(\d+)$/);
 if (m) {
   const d = await (await fetch('/api/v2/detections/' + m[1])).json();

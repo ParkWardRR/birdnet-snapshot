@@ -81,13 +81,13 @@ async function answer(req, url, api) {
   if (!entry && st && st.info.previous) entry = (await loadPrevious(st.info.previous))[k];
   if (entry) {
     try {
-      const r = await fetch('/_snap/' + entry.f);
+      const r = await fetch('/_snap/' + entry.f, { signal: req.signal }); // stop if the page gives up
       if (r.ok) return respond(req, await r.blob(), entry.t || TYPES[entry.f.slice(entry.f.lastIndexOf('.') + 1)] || 'application/octet-stream');
     } catch (e) {
       return json(503, { error: 'unavailable', message: 'The snapshot could not be loaded. Check your connection.' });
     }
   }
-  if (!api) return fetch(url.pathname); // query string on a static file: ignore it (errors caught above)
+  if (!api) return fetch(url.pathname, { signal: req.signal }); // query string on a static file: ignore it (errors caught above)
   // Endpoints a logged-out guest of a real server gets 401 for: answer the
   // same, so the UI treats it as "not signed in" and stays quiet.
   const prot = (st && st.info.protected) || DEFAULT_PROTECTED;

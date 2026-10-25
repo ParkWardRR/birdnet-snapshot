@@ -69,6 +69,12 @@ BirdNET-Go is great to share, but its UI has admin controls, live streams and no
 <td align="center"><sub>Detail page: species, taxonomy, weather, spectrogram and playable clip</sub></td>
 <td align="center"><sub>The phone layout works too</sub></td>
 </tr>
+<tr>
+<td colspan="2"><img src="docs/images/analytics.jpg" alt="The analytics summary page of the snapshot"/></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><sub>Analytics: totals, top species, time of day, trends</sub></td>
+</tr>
 </table>
 
 ## How it works
