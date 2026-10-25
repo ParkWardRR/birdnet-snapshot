@@ -25,6 +25,13 @@ jobs:
         run: scripts/ci-setup.sh
       - name: gofmt
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - name: Report page (typecheck, build, embedded copy is current)
+        run: |
+          cd report/web
+          npm ci --no-audit --no-fund
+          npm run check
+          npm run build
+          git diff --exit-code -- ../dist || { echo "report/dist is stale: run npm run build in report/web and commit"; exit 1; }
       - name: go vet
         run: go vet ./... && (cd tests/browsers && go vet ./...)
       - name: Unit and end-to-end tests (real Chrome)

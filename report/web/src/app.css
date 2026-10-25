@@ -1,0 +1,61 @@
+@import '@fontsource-variable/fraunces';
+@import '@fontsource-variable/fraunces/wght-italic.css';
+@import '@fontsource-variable/inter';
+
+:root {
+	--paper: #f4efe4;
+	--paper-deep: #e9e1d0;
+	--card: #fbf8f1;
+	--ink: #1f2a24;
+	--muted: #6a7266;
+	--rule: #dcd3c0;
+	--forest: #2f5d3a;
+	--forest-light: #5d8a64;
+	--rust: #b5602a;
+	--gold: #d4a24c;
+	--night: #34406b;
+	--serif: 'Fraunces Variable', 'Iowan Old Style', Georgia, serif;
+	--sans: 'Inter Variable', -apple-system, 'Segoe UI', system-ui, sans-serif;
+	color-scheme: light;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html {
+	background: var(--paper);
+	color: var(--ink);
+	font: 400 16px/1.6 var(--sans);
+	-webkit-font-smoothing: antialiased;
+	font-feature-settings: 'tnum' 1, 'lnum' 1;
+}
+
+body {
+	margin: 0;
+}
+
+/* Print: US Letter pages, colours kept, interactive bits hidden. */
+@page {
+	size: letter;
+	margin: 12mm 12mm 14mm;
+}
+
+@media print {
+	html {
+		font-size: 13px;
+		print-color-adjust: exact;
+		-webkit-print-color-adjust: exact;
+		background: var(--paper);
+	}
+	.no-print {
+		display: none !important;
+	}
+	.page-break {
+		break-before: page;
+	}
+	a {
+		color: inherit;
+		text-decoration: none;
+	}
+}

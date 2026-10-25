@@ -2,6 +2,19 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [0.2.0] - 2026-10-25
+
+### Added
+
+- `report`: **Field Notes**, an illustrated report page and PDF for the last `-days` days: cover with the most-heard bird, a written summary, a 24-hour dial, a species-by-hour heatmap, photo cards, new arrivals, night shift, early risers, least expected visitors, day by day, every species, photo credits. A SvelteKit app embedded in the binary; 900 px Avicommons photos (credited) with BirdNET-Go's as fallback; PDF printed by headless Chrome; `-deploy` publishes it with the same Bunny deploy.
+- `bunny-setup -fallback` for sites whose SPA fallback is not `/ui/index.html`; SvelteKit's `/_app/immutable/*` is cached for a year.
+- `tests/browsers`: `-ready` and `-sw` to check pages other than snapshots.
+
+### Changed
+
+- `deploy` publishes any site with an `index.html`, not only snapshots.
+- `bunny-setup` prints a generic URL line.
+
 ## [0.1.0] - 2026-10-24
 
 First public release.
@@ -28,4 +41,5 @@ First public release.
 - Tests: unit tests, fake Bunny storage and account APIs, an end-to-end test that crawls a fake BirdNET-Go with real Chrome and browses the result, and `tests/browsers`, a Playwright check in Chromium, Firefox and WebKit that also plays a recorded clip in each engine.
 - CI and releases on a self-hosted Podman runner with a same-repository guard and a runner policy check; scheduled browser check of a live snapshot.
 
+[0.2.0]: https://github.com/ParkWardRR/birdnet-snapshot/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ParkWardRR/birdnet-snapshot/releases/tag/v0.1.0

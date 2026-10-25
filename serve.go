@@ -41,10 +41,11 @@ func serveHandler(dir string) http.Handler {
 
 // serve previews c.Out locally until the context ends.
 func serve(ctx context.Context, c config, addr string) error {
-	if _, err := os.Stat(filepath.Join(c.Out, "snapshot.json")); err != nil {
-		log.Printf("warning: %s has no snapshot.json yet; visitors will see the holding page", c.Out)
+	h := serveHandler(c.Out)
+	if _, err := os.Stat(filepath.Join(c.Out, "ui", "index.html")); err != nil {
+		h = reportServeHandler(c.Out) // a report, not a snapshot
 	}
-	srv := &http.Server{Addr: addr, Handler: serveHandler(c.Out), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

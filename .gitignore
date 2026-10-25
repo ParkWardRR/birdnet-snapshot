@@ -6,3 +6,5 @@
 coverage.out
 /birdnet-snapshot
 .DS_Store
+/report/web/node_modules/
+/report/web/.svelte-kit/

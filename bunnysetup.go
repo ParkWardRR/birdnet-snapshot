@@ -100,7 +100,7 @@ type dnsZone struct {
 }
 
 // immutablePatterns are the content-addressed paths cached for a year.
-var immutablePatterns = []string{"*/_snap/*", "*/ui/assets/*.js", "*/ui/assets/*.css"}
+var immutablePatterns = []string{"*/_snap/*", "*/ui/assets/*.js", "*/ui/assets/*.css", "*/_app/immutable/*"}
 
 const (
 	ruleEdge    = "birdnet-snapshot: immutable files, edge 1y"
@@ -116,6 +116,7 @@ type setupOpts struct {
 	EnvFile   string
 	EdgeTTL   int
 	Delete    bool
+	Fallback  string
 	Purge     bool
 	Yes       bool
 	CertTries int
@@ -133,6 +134,7 @@ func bunnySetupMain(args []string) error {
 	fs.StringVar(&o.EnvFile, "env-file", "", "write BUNNY_STORAGE_* settings to this `file` (mode 600) instead of printing them")
 	fs.IntVar(&o.EdgeTTL, "edge-ttl", 60, "edge cache `seconds` for entry files (index, snapshot.json)")
 	fs.BoolVar(&o.Purge, "purge", false, "purge the pull zone's edge cache when done (after changing cache rules)")
+	fs.StringVar(&o.Fallback, "fallback", "/ui/index.html", "`path` served (status 200) for unknown paths: /ui/index.html for snapshots, /index.html for the report")
 	fs.BoolVar(&o.Delete, "delete", false, "delete the pull zone, storage zone and DNS record instead")
 	fs.BoolVar(&o.Yes, "yes", false, "confirm -delete")
 	fs.Usage = func() {
@@ -177,13 +179,16 @@ func bunnySetup(ctx context.Context, api *bunnyAPI, o setupOpts, out io.Writer) 
 		log.Printf("storage zone %s exists (id %d, %s)", sz.Name, sz.ID, sz.Region)
 	}
 	// SPA routes: anything missing serves the UI shell with status 200.
-	if sz.Custom404FilePath == nil || *sz.Custom404FilePath != "/ui/index.html" || !sz.Rewrite404To200 {
+	if o.Fallback == "" {
+		o.Fallback = "/ui/index.html"
+	}
+	if sz.Custom404FilePath == nil || *sz.Custom404FilePath != o.Fallback || !sz.Rewrite404To200 {
 		if err := api.do(ctx, http.MethodPost, fmt.Sprintf("/storagezone/%d", sz.ID), map[string]any{
-			"Custom404FilePath": "/ui/index.html", "Rewrite404To200": true,
+			"Custom404FilePath": o.Fallback, "Rewrite404To200": true,
 		}, nil); err != nil {
 			return err
 		}
-		log.Printf("storage zone: missing paths now serve /ui/index.html")
+		log.Printf("storage zone: missing paths now serve %s", o.Fallback)
 	}
 	if sz.Password == "" || sz.StorageHostname == "" {
 		if err := api.do(ctx, http.MethodGet, fmt.Sprintf("/storagezone/%d", sz.ID), nil, sz); err != nil {
@@ -318,7 +323,7 @@ func bunnySetup(ctx context.Context, api *bunnyAPI, o setupOpts, out io.Writer) 
 	} else {
 		fmt.Fprintf(out, "\n# deploy settings (keep BUNNY_STORAGE_KEY secret)\n%s", settings)
 	}
-	fmt.Fprintf(out, "\nsnapshot URL: %s\n", url)
+	fmt.Fprintf(out, "\nURL: %s\n", url)
 	return nil
 }
 

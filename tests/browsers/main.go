@@ -74,6 +74,8 @@ func main() {
 	shots := flag.String("shots", "", "directory for screenshots (empty: none)")
 	pagesFlag := flag.String("pages", "/ui/dashboard,/ui/analytics,/ui/analytics/species,/ui/analytics/trends,/ui/search,/ui/about,@detail", "pages; @detail = a recorded detection with audio")
 	settle := flag.Duration("settle", 4*time.Second, "time to let a page settle after the app starts")
+	readySel := flag.String("ready", "#snapshot-banner", "CSS selector that means the app has started (use html[data-ready=\"1\"] for a Field Notes report)")
+	swCheck := flag.Bool("sw", true, "require the snapshot service worker to control each page")
 	strict := flag.Bool("strict", false, "fail on warnings too")
 	debug := flag.Bool("debug", false, "log every aborted request and console message with its resource type")
 	ignore := flag.String("ignore", "", "comma-separated substrings of findings to ignore")
@@ -197,8 +199,8 @@ func main() {
 						add(finding{name, vp.name, p, "navigation", err.Error()})
 						break
 					}
-					if err := page.Locator("#snapshot-banner").WaitFor(playwright.LocatorWaitForOptions{Timeout: playwright.Float(30000)}); err != nil {
-						add(finding{name, vp.name, p, "app did not start", "no snapshot banner within 30 s"})
+					if err := page.Locator(*readySel).WaitFor(playwright.LocatorWaitForOptions{Timeout: playwright.Float(30000), State: playwright.WaitForSelectorStateAttached}); err != nil {
+						add(finding{name, vp.name, p, "app did not start", *readySel + " not found within 30 s"})
 						break
 					}
 					if pass == 0 {
@@ -210,7 +212,7 @@ func main() {
 					// early aborts its requests, which the UI logs as errors.
 					time.Sleep(*settle)
 				}
-				checkDOM(page, func(kind, detail string) { add(finding{name, vp.name, p, kind, detail}) })
+				checkDOM(page, *swCheck, func(kind, detail string) { add(finding{name, vp.name, p, kind, detail}) })
 				if *shots != "" {
 					f := filepath.Join(*shots, fmt.Sprintf("%s-%s-%s.png", name, vp.name, slug(p)))
 					_, _ = page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String(f), FullPage: playwright.Bool(false)})
@@ -243,7 +245,7 @@ func main() {
 
 // checkDOM looks for what a visitor sees: toasts and alerts, images that
 // failed to load, and whether the service worker controls the page.
-func checkDOM(page playwright.Page, add func(kind, detail string)) {
+func checkDOM(page playwright.Page, swCheck bool, add func(kind, detail string)) {
 	res, err := page.Evaluate(`() => {
 		const out = {toasts: [], broken: [], controlled: !!(navigator.serviceWorker && navigator.serviceWorker.controller)};
 		const sel = '[role="alert"], [role="status"], [data-sonner-toast], .toast, [class*="toast"], [class*="Toast"], .alert-error, [class*="notification"]';
@@ -275,7 +277,7 @@ func checkDOM(page playwright.Page, add func(kind, detail string)) {
 		return
 	}
 	m, _ := res.(map[string]any)
-	if c, _ := m["controlled"].(bool); !c {
+	if c, _ := m["controlled"].(bool); swCheck && !c {
 		add("service worker", "page not controlled by the snapshot service worker")
 	}
 	seen := map[string]bool{}

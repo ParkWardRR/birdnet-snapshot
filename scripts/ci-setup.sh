@@ -35,6 +35,7 @@ if [ ! -x "$node_dir/bin/node" ]; then
 fi
 # npm runs "env node": put this Node ahead of the runner image's old one.
 export PATH="$node_dir/bin:$PATH"
+add_path "$node_dir/bin" # the report page is built with npm in CI
 
 # playwright-go driver: <dir>/package/cli.js run by PLAYWRIGHT_NODEJS_PATH.
 driver="$cache/ms-playwright-go/$PW_VERSION"

@@ -25,7 +25,7 @@ import (
 // they reference, with snapshot.json strictly last.
 var swapOrder = []string{
 	"sw.js", "_snapshot/boot.js", "_snapshot/snapshot.css",
-	"ui/index.html", "404.html", "_redirects", "robots.txt", "index.html", "snapshot.json",
+	"ui/index.html", "404.html", "_redirects", "robots.txt", "data/report.json", "index.html", "snapshot.json",
 }
 
 type bunny struct {
@@ -94,7 +94,9 @@ func deploy(ctx context.Context, c config) (*deployResult, error) {
 		return nil, err
 	}
 	if _, ok := local["snapshot.json"]; !ok {
-		return nil, fmt.Errorf("%s has no snapshot.json; run crawl first", c.Out)
+		if _, ok := local["index.html"]; !ok {
+			return nil, fmt.Errorf("%s has no snapshot.json or index.html; run crawl or report first", c.Out)
+		}
 	}
 	var next snapshotInfo
 	if raw, err := os.ReadFile(filepath.Join(c.Out, "snapshot.json")); err == nil {

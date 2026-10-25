@@ -1,6 +1,6 @@
 # Roadmap
 
-## What ships today (v0.1.0)
+## What ships today (v0.2.0)
 
 One Go binary (or a container with Chrome bundled) that turns a live BirdNET-Go UI into a read-only static site.
 
@@ -13,6 +13,7 @@ One Go binary (or a container with Chrome bundled) that turns a live BirdNET-Go 
 | Safety | Broken-crawl guard (`-min-entries`), shrink guard (`-max-shrink`, `-force`), atomic local build, entry files uploaded last, one generation of grace |
 | Publishing | Bunny storage checksum-diff deploy; `bunny-setup` (zones, cache rules, hostname, DNS, certificate, teardown); `404.html` + `_redirects` for other hosts; `serve` preview |
 | Time | Timezone auto-detected from BirdNET-Go; dashboard pinned to the snapshot day; clock pinned to the snapshot time |
+| Reporting | `report`: Field Notes page + PDF with Avicommons photos, written highlights, 24-hour dial, heatmap, species cards |
 | Ops | `check`, Prometheus textfile metrics, `run -every`, systemd / quadlet / compose examples, daemonless multi-arch image, CI on a self-hosted runner with Chrome end-to-end and Chromium/Firefox/WebKit checks |
 
 ---
@@ -30,6 +31,7 @@ One Go binary (or a container with Chrome bundled) that turns a live BirdNET-Go 
 | Soon | Smaller media: transcode spectrograms to WebP/AVIF and clips to Opus at build time | Idea |
 | Soon | Source labels: rename audio sources in published data (e.g. "Doorbell" → "Front") | Idea |
 | Soon | Search: pre-record searches for every detected species name so the search box works offline | Idea |
+| Soon | Field Notes: month and season editions, year-over-year comparisons once there is history | Idea |
 | Later | Snapshot history: keep dated snapshots side by side (`/2026-10-24/`) with a picker | Idea |
 | Later | Optional password gate via Bunny token authentication | Idea |
 | Later | BirdNET-Pi / BirdNET-PiPy support | Idea |
@@ -43,4 +45,5 @@ One Go binary (or a container with Chrome bundled) that turns a live BirdNET-Go 
 
 | Version | Highlights |
 |---|---|
+| v0.2.0 | Field Notes: an illustrated report page and PDF |
 | v0.1.0 | First public release (see [CHANGELOG](CHANGELOG.md)) |

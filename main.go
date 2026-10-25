@@ -76,7 +76,7 @@ func main() {
 		return
 	}
 
-	c, addr := parseFlags(cmd, os.Args[2:])
+	c, addr, rc := parseFlags(cmd, os.Args[2:])
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -93,6 +93,10 @@ func main() {
 		err = serve(ctx, c, addr)
 	case "check":
 		err = check(ctx, c)
+	case "report":
+		if err = buildReport(ctx, c, rc); err == nil && rc.Deploy {
+			_, err = deploy(ctx, c)
+		}
 	default:
 		usage()
 	}
@@ -102,8 +106,9 @@ func main() {
 }
 
 // parseFlags reads the shared flags; every flag falls back to an env var.
-func parseFlags(cmd string, args []string) (config, string) {
+func parseFlags(cmd string, args []string) (config, string, reportConfig) {
 	var c config
+	var rc reportConfig
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
 	fs.StringVar(&c.BirdNET, "birdnet", env("BIRDNET_URL", "http://127.0.0.1:8080"), "BirdNET-Go base `url` [BIRDNET_URL]")
 	fs.StringVar(&c.Chrome, "chrome", env("CHROME_URL", ""), "DevTools `url` of a running Chrome; empty launches one [CHROME_URL]")
@@ -135,6 +140,12 @@ func parseFlags(cmd string, args []string) (config, string) {
 	fs.DurationVar(&c.Budget, "budget", envDur("SNAPSHOT_BUDGET", 20*time.Minute), "overall crawl time budget [SNAPSHOT_BUDGET]")
 	fs.IntVar(&c.Concurrency, "concurrency", envInt("SNAPSHOT_CONCURRENCY", 8), "parallel uploads [SNAPSHOT_CONCURRENCY]")
 	addr := fs.String("addr", env("SNAPSHOT_ADDR", "127.0.0.1:8765"), "serve: listen `address` [SNAPSHOT_ADDR]")
+	fs.StringVar(&rc.Title, "title", env("REPORT_TITLE", "Field Notes"), "report: title [REPORT_TITLE]")
+	fs.StringVar(&rc.Subtitle, "subtitle", env("REPORT_SUBTITLE", "A week of birdsong, as heard by the station"), "report: subtitle [REPORT_SUBTITLE]")
+	fs.StringVar(&rc.Station, "station", env("REPORT_STATION", "A backyard listening station"), "report: station name shown on the cover; keep it vague [REPORT_STATION]")
+	fs.BoolVar(&rc.PDF, "pdf", envBool("REPORT_PDF", true), "report: also print the report to a PDF [REPORT_PDF]")
+	fs.BoolVar(&rc.Photos, "photos", envBool("REPORT_PHOTOS", true), "report: fetch large species photos from Avicommons (else BirdNET-Go's small ones) [REPORT_PHOTOS]")
+	fs.BoolVar(&rc.Deploy, "deploy", envBool("REPORT_DEPLOY", false), "report: deploy -out to the Bunny storage zone when built [REPORT_DEPLOY]")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: birdnet-snapshot %s [flags]\n\n", cmd)
 		fs.PrintDefaults()
@@ -149,7 +160,8 @@ func parseFlags(cmd string, args []string) (config, string) {
 	if c.Concurrency < 1 {
 		c.Concurrency = 1
 	}
-	return c, *addr
+	rc.Days = c.Days
+	return c, *addr, rc
 }
 
 // runLoop runs crawl+deploy once, or every c.Every until the context ends.
@@ -280,6 +292,7 @@ commands:
   deploy       sync -out to a Bunny storage zone (needs BUNNY_STORAGE_KEY)
   serve        preview -out locally the way the CDN serves it
   check        test the BirdNET-Go, Chrome and Bunny settings
+  report       build Field Notes: an illustrated report page + PDF (-deploy to publish)
   bunny-setup  create the Bunny storage zone, pull zone, hostname and cert
   version      print the version
 

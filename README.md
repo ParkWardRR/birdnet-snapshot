@@ -101,6 +101,35 @@ flowchart LR
 3. **Deploy.** Only files whose checksum changed are uploaded; `snapshot.json` goes last. Files from the previous snapshot are kept one more round so visitors mid-session don't break.
 4. **Visit.** The service worker (preloaded with the manifest at install) maps each API call, minus cache-busting params, to its recorded response. It answers spectrogram status checks from what was recorded and returns `401` for protected endpoints, as a real server does for guests, so the UI stays quiet. Writes get `403`, and anything the crawl never saw gets `404`.
 
+## Field Notes: an illustrated report
+
+A second, different way to share the station. Instead of copying the app, `birdnet-snapshot report` writes an editorial **report page and a PDF** about the last N days: a cover with the most-heard bird, the period in brief (written from the numbers), a 24-hour dial and a species-by-hour heatmap, photo cards for the regulars, new arrivals and the least expected visitors, a day-by-day chart, the full species list, and photo credits.
+
+<table>
+<tr>
+<td width="55%"><img src="docs/images/fieldnotes-cover.jpg" alt="Field Notes cover: the most-heard bird, title, period and headline numbers"/></td>
+<td width="45%"><img src="docs/images/fieldnotes-cards.jpg" alt="Field Notes species cards with photos and hourly activity"/></td>
+</tr>
+<tr>
+<td colspan="2"><img src="docs/images/fieldnotes-pdf.jpg" alt="The Field Notes PDF, seven Letter pages"/></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><sub>The web page (top) and the PDF it prints to (bottom)</sub></td>
+</tr>
+</table>
+
+```sh
+birdnet-snapshot report -birdnet http://127.0.0.1:8080 -out field-notes          # page + PDF
+birdnet-snapshot serve -out field-notes                                          # preview
+BUNNY_API_KEY=... birdnet-snapshot bunny-setup -name my-notes -hostname notes.example.com -fallback /index.html -env-file notes.env
+set -a; . ./notes.env; set +a; birdnet-snapshot report -out field-notes -deploy   # build and publish
+```
+
+- **The page** is a SvelteKit app built into `report/dist` and embedded in the binary, so nothing needs Node at run time. Fonts are bundled; the page makes no third-party requests and carries a hash-pinned CSP.
+- **Photos** are 900 px images from [Avicommons](https://avicommons.org) (credited, with their licenses), fetched once per build and published with the report; BirdNET-Go's own image is the fallback. `-photos=false` uses only BirdNET-Go's.
+- **The PDF** is the same page printed by headless Chrome with a print stylesheet (US Letter, covers and sections on their own pages, nine species cards per page). `-pdf=false` skips it.
+- **Privacy:** only aggregate counts per species and hour. No coordinates (they are never copied from BirdNET-Go), no audio, no source names; night is a fixed 7 pm–6 am window because real sunrise times would reveal latitude. A station younger than the period gets a report covering only the days it listened.
+
 ## Install
 
 **Binary** (Linux, macOS, Windows; needs Chrome or Chromium installed, or a running one via `-chrome`):
@@ -209,6 +238,7 @@ systemctl --user daemon-reload && systemctl --user enable --now birdnet-snapshot
 | `deploy` | sync `-out` to the Bunny storage zone. `-dry` shows the plan |
 | `serve` | preview `-out` locally with the CDN's routing rules |
 | `check` | test BirdNET-Go, Chrome and Bunny settings |
+| `report` | build Field Notes, an illustrated report page and PDF; `-deploy` publishes it |
 | `bunny-setup` | create/reuse storage zone, pull zone, cache rules, security headers, write blocking, hostname, DNS, certificate. `-purge` clears the edge cache, `-delete -yes` tears it down |
 | `version` | print the version |
 
@@ -243,6 +273,8 @@ Every flag has an environment variable, handy for containers and systemd `Enviro
 | `-zone` / `-zone-host` | `BUNNY_STORAGE_ZONE` / `BUNNY_STORAGE_HOST` | / `storage.bunnycdn.com` | storage zone and its regional endpoint |
 | | `BUNNY_STORAGE_KEY` | | storage zone password |
 | | `TZ` | auto-detected | BirdNET-Go's timezone |
+| `-title`, `-subtitle`, `-station` | `REPORT_TITLE`, `REPORT_SUBTITLE`, `REPORT_STATION` | Field Notes, … | `report`: cover text (keep the station vague) |
+| `-pdf`, `-photos`, `-deploy` | `REPORT_PDF`, `REPORT_PHOTOS`, `REPORT_DEPLOY` | `true`, `true`, `false` | `report`: print a PDF, fetch Avicommons photos, publish when built |
 | `-budget`, `-page-wait`, `-concurrency`, `-addr` | `SNAPSHOT_BUDGET`, … | `20m`, `20s`, `8`, `127.0.0.1:8765` | tuning |
 
 ## Privacy and safety

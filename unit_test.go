@@ -464,7 +464,7 @@ func TestParseFlagsEnvFallback(t *testing.T) {
 	t.Setenv("SKIP_AUDIO_SOURCES", "Doorbell, Porch")
 	t.Setenv("SNAPSHOT_DAYS", "3")
 	t.Setenv("BUNNY_STORAGE_KEY", "k")
-	c, _ := parseFlags("crawl", []string{"-max-pages", "9", "-routes", "/ui/analytics/advanced,ui/x"})
+	c, _, _ := parseFlags("crawl", []string{"-max-pages", "9", "-routes", "/ui/analytics/advanced,ui/x"})
 	if c.BirdNET != "http://bird.lan:8080" || c.Days != 3 || c.MaxPages != 9 || c.ZoneKey != "k" {
 		t.Errorf("bad config %+v", c)
 	}
