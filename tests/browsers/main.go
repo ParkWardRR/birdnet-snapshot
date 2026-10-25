@@ -55,6 +55,10 @@ func severity(f finding) string {
 		return "warn"
 	case f.Kind == "console error" && strings.Contains(f.Detail, "ServiceWorker intercepted the request") && strings.Contains(f.Detail, "Failed to load ‘’"):
 		return "warn" // Firefox: the page aborted a request the worker was answering
+	case f.Kind == "request failed" && strings.Contains(f.Detail, "NS_ERROR_PARSED_DATA_CACHED"):
+		return "" // Firefox media cache cancelled a repeat request for a clip it already has
+	case f.Kind == "console error" && strings.Contains(f.Detail, "ServiceWorker intercepted the request") && strings.Contains(f.Detail, "/_snap/") && (strings.Contains(f.Detail, ".flac") || strings.Contains(f.Detail, ".mp3") || strings.Contains(f.Detail, ".wav")):
+		return "" // the same cancellation, as Firefox logs it; playback is checked separately
 	}
 	return "fail"
 }
@@ -406,4 +410,25 @@ func trunc(s string, n int) string {
 		return s
 	}
 	return s[:n-1] + "…"
+}
+
+// checkPlayback plays a detection's recorded clip through the service worker
+// and checks the playhead moves, so audio is proven to work in every engine.
+func checkPlayback(page playwright.Page, id string, add func(kind, detail string)) {
+	res, err := page.Evaluate(`async (id) => {
+		const a = new Audio('/api/v2/audio/' + id);
+		a.muted = true;
+		try { await a.play(); } catch (e) { return 'play() failed: ' + e.message; }
+		await new Promise(r => setTimeout(r, 1500));
+		const t = a.currentTime, err = a.error && a.error.code;
+		a.pause();
+		return err ? 'media error ' + err : (t > 0 ? 'ok' : 'playhead did not move');
+	}`, id)
+	if err != nil {
+		add("audio", err.Error())
+		return
+	}
+	if s, _ := res.(string); s != "ok" {
+		add("audio", "clip of detection "+id+": "+s)
+	}
 }

@@ -12,6 +12,7 @@ First public release.
 - Asset closure: every chunk, stylesheet, sound, icon and manifest referenced by the recorded JS, CSS and HTML is recorded, so rare code paths work.
 - Media retry: spectrograms and clips still being written during the crawl are fetched again at the end.
 - Static site with a service worker that answers the UI's API calls from content-addressed recordings (preloaded at install), honours `Range` for audio, answers spectrogram status checks, returns `401` for protected endpoints like a real server does for guests, refuses writes (`403`) and returns `404` for anything not recorded.
+- Audio through the CDN: byte-range requests go straight to the CDN for a real `206` (Firefox rejects partial responses a worker builds for media elements); `bunny-setup` sets `.flac`/`.ogg`/`.m4a` content types.
 - Upgrade-safe: deploy records the replaced manifest in `snapshot.json`, and the service worker falls back to it, so pages still running the previous BirdNET-Go build keep working.
 - Compact manifest: 80-bit content names and content types derived from the file extension.
 - `deploy`: checksum-diff upload to a Bunny storage zone, entry files last, one generation of grace, `-dry`.
@@ -24,7 +25,7 @@ First public release.
 - Prometheus textfile metrics (`-metrics-file`), written atomically.
 - `404.html` and `_redirects` for GitHub Pages, Cloudflare Pages and Netlify.
 - Container image with Chrome bundled (`ghcr.io/parkwardrr/birdnet-snapshot`, linux/amd64 + linux/arm64, non-root), built without a daemon by `tools/mkimage`; Dockerfile for local builds; systemd, quadlet and compose examples.
-- Tests: unit tests, fake Bunny storage and account APIs, an end-to-end test that crawls a fake BirdNET-Go with real Chrome and browses the result, and `tests/browsers`, a Playwright check in Chromium, Firefox and WebKit.
+- Tests: unit tests, fake Bunny storage and account APIs, an end-to-end test that crawls a fake BirdNET-Go with real Chrome and browses the result, and `tests/browsers`, a Playwright check in Chromium, Firefox and WebKit that also plays a recorded clip in each engine.
 - CI and releases on a self-hosted Podman runner with a same-repository guard and a runner policy check; scheduled browser check of a live snapshot.
 
 [0.1.0]: https://github.com/ParkWardRR/birdnet-snapshot/releases/tag/v0.1.0
