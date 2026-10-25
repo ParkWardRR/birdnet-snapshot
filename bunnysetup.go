@@ -217,7 +217,7 @@ func bunnySetup(ctx context.Context, api *bunnyAPI, o setupOpts, out io.Writer) 
 	if err := api.do(ctx, http.MethodPost, fmt.Sprintf("/pullzone/%d", pz.ID), map[string]any{
 		"CacheControlMaxAgeOverride": o.EdgeTTL, "CacheControlPublicMaxAgeOverride": 0,
 		"IgnoreQueryStrings": true, "EnableTLS1": false, "EnableTLS1_1": false,
-		"UseStaleWhileUpdating": true, "UseStaleWhileOffline": true,
+		"UseStaleWhileUpdating": false, "UseStaleWhileOffline": true, // never serve an expired snapshot.json while online: it can point at deleted files
 	}, nil); err != nil {
 		return err
 	}

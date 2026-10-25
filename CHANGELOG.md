@@ -12,10 +12,12 @@ First public release.
 - Asset closure: every chunk, stylesheet, sound, icon and manifest referenced by the recorded JS, CSS and HTML is recorded, so rare code paths work.
 - Media retry: spectrograms and clips still being written during the crawl are fetched again at the end.
 - Static site with a service worker that answers the UI's API calls from content-addressed recordings (preloaded at install), honours `Range` for audio, answers spectrogram status checks, returns `401` for protected endpoints like a real server does for guests, refuses writes (`403`) and returns `404` for anything not recorded.
+- Upgrade-safe: deploy records the replaced manifest in `snapshot.json`, and the service worker falls back to it, so pages still running the previous BirdNET-Go build keep working.
+- Compact manifest: 80-bit content names and content types derived from the file extension.
 - `deploy`: checksum-diff upload to a Bunny storage zone, entry files last, one generation of grace, `-dry`.
 - `run` (with `-every`), `serve` (local preview with CDN routing), `check` (BirdNET-Go, Chrome, Bunny), `bunny-setup`, `version`.
 - `bunny-setup`: storage zone with SPA fallback, pull zone, year-long caching of content-addressed paths only, security headers (HSTS, nosniff, frame-deny, no-referrer, Permissions-Policy, COOP/CORP, `frame-ancestors`), writes blocked at the edge, stale-while-revalidate, web manifest content type, hostname, Bunny DNS CNAME, free certificate, Force SSL; `-purge`, `-delete -yes`. Idempotent, and adopts equivalent existing rules.
-- Privacy: guest view forced; admin/settings/stream endpoints never requested; writes blocked inside Chrome; coordinates removed from recorded data (`-location hide|coarse|keep`); `-skip-audio` / `-no-audio` (also drops preloaded clips); RTSP URL scrubbing; `-redact` patterns; `noindex` + `robots.txt` unless `-allow-indexing`.
+- Privacy: guest view forced; admin/settings/stream endpoints never requested; writes blocked inside Chrome; coordinates removed from recorded data (`-location hide|coarse|keep`); `-skip-audio` / `-no-audio` withhold clips **and spectrograms** (also preloaded ones) and blank `clipName` so the UI shows no player; RTSP URL scrubbing; `-redact` patterns; `noindex` + `robots.txt` unless `-allow-indexing`.
 - Content-Security-Policy meta tag with the shell's inline scripts pinned by SHA-256, plus `no-referrer`.
 - Safety: `-forbid` patterns fail the build if found in any published file; `-min-entries` broken-crawl guard; `-max-shrink` / `-force` shrink guard; atomic local builds.
 - Timezone auto-detection from BirdNET-Go detection timestamps (or `TZ`), with Chrome's timezone overridden to match; dashboard and clock pinned to the snapshot.
