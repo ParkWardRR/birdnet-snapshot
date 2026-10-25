@@ -1,0 +1,24 @@
+# User unit: ~/.config/systemd/user/birdnet-report.service
+# Builds Field Notes and publishes it (REPORT_DEPLOY=true in the env file).
+# Chrome only prints the PDF; DevTools on 127.0.0.1:9223 so it never collides
+# with birdnet-snapshot.service on 9222.
+#
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now birdnet-report.timer
+#   loginctl enable-linger $USER    # keep user timers running after logout
+[Unit]
+Description=Publish Field Notes, the illustrated BirdNET-Go report
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/birdnet-report/env
+ExecStartPre=-/usr/bin/podman rm -f bns-chrome-report
+ExecStartPre=/usr/bin/podman run -d --rm --name bns-chrome-report --network host --shm-size 1g --log-driver none \
+  --entrypoint /headless-shell/headless-shell docker.io/chromedp/headless-shell:157.0.8103.15 \
+  --no-sandbox --remote-debugging-address=127.0.0.1 --remote-debugging-port=9223
+ExecStartPre=/bin/sh -c 'for i in $(seq 30); do curl -sf http://127.0.0.1:9223/json/version >/dev/null && exit 0; sleep 1; done; exit 1'
+ExecStart=%h/.local/bin/birdnet-snapshot report -chrome http://127.0.0.1:9223 -out %h/.cache/birdnet-report/site
+ExecStopPost=/usr/bin/podman rm -f bns-chrome-report
+TimeoutStartSec=15min
+Nice=10

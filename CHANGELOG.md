@@ -2,6 +2,16 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `deploy/systemd/birdnet-report.{service,timer}` and `deploy/report.env.example`: rebuild and publish Field Notes every 6 hours.
+
+### Fixed
+
+- README install command pointed at the 0.1.0 tarball under `latest/`, which 404s since 0.2.0.
+
 ## [0.2.0] - 2026-10-25
 
 ### Added

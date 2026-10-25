@@ -128,6 +128,7 @@ set -a; . ./notes.env; set +a; birdnet-snapshot report -out field-notes -deploy 
 - **The page** is a SvelteKit app built into `report/dist` and embedded in the binary, so nothing needs Node at run time. Fonts are bundled; the page makes no third-party requests and carries a hash-pinned CSP.
 - **Photos** are 900 px images from [Avicommons](https://avicommons.org) (credited, with their licenses), fetched once per build and published with the report; BirdNET-Go's own image is the fallback. `-photos=false` uses only BirdNET-Go's.
 - **The PDF** is the same page printed by headless Chrome with a print stylesheet (US Letter, covers and sections on their own pages, nine species cards per page). `-pdf=false` skips it.
+- **On a schedule:** [`deploy/systemd/birdnet-report.{service,timer}`](deploy/systemd/) rebuild and publish the report every 6 hours from `~/.config/birdnet-report/env` (start from [`deploy/report.env.example`](deploy/report.env.example), with its own storage zone). Only changed files are uploaded, so a run with no new birds costs almost nothing. It sits beside the snapshot timer; its Chrome uses port 9223. Setup is under [systemd timer with the binary](#running-it-on-a-schedule).
 - **Privacy:** only aggregate counts per species and hour. No coordinates (they are never copied from BirdNET-Go), no audio, no source names; night is a fixed 7 pm–6 am window because real sunrise times would reveal latitude. A station younger than the period gets a report covering only the days it listened.
 
 ## Install
@@ -136,8 +137,9 @@ set -a; . ./notes.env; set +a; birdnet-snapshot report -out field-notes -deploy 
 
 ```sh
 # pick your platform from https://github.com/ParkWardRR/birdnet-snapshot/releases
-curl -L https://github.com/ParkWardRR/birdnet-snapshot/releases/latest/download/birdnet-snapshot_0.1.0_linux_amd64.tar.gz | tar -xz
-sudo install birdnet-snapshot_0.1.0_linux_amd64/birdnet-snapshot /usr/local/bin/
+v=0.2.0
+curl -L https://github.com/ParkWardRR/birdnet-snapshot/releases/download/v$v/birdnet-snapshot_${v}_linux_amd64.tar.gz | tar -xz
+sudo install birdnet-snapshot_${v}_linux_amd64/birdnet-snapshot /usr/local/bin/
 ```
 
 **Container** with Chrome bundled (amd64, arm64):
@@ -156,7 +158,7 @@ docker pull ghcr.io/parkwardrr/birdnet-snapshot:latest
 birdnet-snapshot check -birdnet http://127.0.0.1:8080
 ```
 ```
-birdnet-snapshot v0.1.0 check
+birdnet-snapshot v0.2.0 check
   ✓ birdnet    http://127.0.0.1:8080, BirdNET-Go 20261014
   ✓ chrome     Chrome/157.0.8103.15 (launched)
   - bunny      not configured (BUNNY_STORAGE_ZONE / BUNNY_STORAGE_KEY); crawl and serve still work
@@ -219,13 +221,16 @@ volumes:
 <details>
 <summary><b>systemd timer with the binary</b></summary>
 
-[`deploy/systemd/`](deploy/systemd/): a oneshot service plus an hourly timer. Chrome runs as a throwaway container with DevTools bound to `127.0.0.1`, so the host needs only podman.
+[`deploy/systemd/`](deploy/systemd/): oneshot services plus timers, hourly for the snapshot and every 6 hours for Field Notes. Chrome runs as a throwaway container with DevTools bound to `127.0.0.1`, so the host needs only podman.
 
 ```sh
 install -m 755 birdnet-snapshot ~/.local/bin/
-cp deploy/systemd/* ~/.config/systemd/user/
-install -m 600 deploy/env.example ~/.config/birdnet-snapshot/env   # then edit
-systemctl --user daemon-reload && systemctl --user enable --now birdnet-snapshot.timer
+mkdir -p ~/.config/systemd/user && cp deploy/systemd/* ~/.config/systemd/user/
+install -D -m 600 deploy/env.example ~/.config/birdnet-snapshot/env        # then edit
+install -D -m 600 deploy/report.env.example ~/.config/birdnet-report/env   # then edit
+systemctl --user daemon-reload
+systemctl --user enable --now birdnet-snapshot.timer birdnet-report.timer
+loginctl enable-linger $USER   # keep user timers running after logout
 ```
 </details>
 

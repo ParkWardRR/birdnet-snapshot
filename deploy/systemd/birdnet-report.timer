@@ -1,0 +1,10 @@
+[Unit]
+Description=Field Notes every 6 hours
+
+[Timer]
+OnCalendar=*-*-* 00/6:25:00
+Persistent=true
+RandomizedDelaySec=2m
+
+[Install]
+WantedBy=timers.target
