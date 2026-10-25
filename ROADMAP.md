@@ -13,7 +13,7 @@ One Go binary (or a container with Chrome bundled) that turns a live BirdNET-Go 
 | Safety | Broken-crawl guard (`-min-entries`), shrink guard (`-max-shrink`, `-force`), atomic local build, entry files uploaded last, one generation of grace |
 | Publishing | Bunny storage checksum-diff deploy; `bunny-setup` (zones, cache rules, hostname, DNS, certificate, teardown); `404.html` + `_redirects` for other hosts; `serve` preview |
 | Time | Timezone auto-detected from BirdNET-Go; dashboard pinned to the snapshot day; clock pinned to the snapshot time |
-| Reporting | `report`: Field Notes page + PDF with Avicommons photos, written highlights, 24-hour dial, heatmap, species cards |
+| Reporting | `report`: Field Notes page + PDF with Avicommons photos, written highlights, best and latest recordings as playable spectrograms, 24-hour dial, heatmap, species cards |
 | Ops | `check`, Prometheus textfile metrics, `run -every`, systemd / quadlet / compose examples, daemonless multi-arch image, CI on a self-hosted runner with Chrome end-to-end and Chromium/Firefox/WebKit checks |
 
 ---
@@ -45,5 +45,6 @@ One Go binary (or a container with Chrome bundled) that turns a live BirdNET-Go 
 
 | Version | Highlights |
 |---|---|
+| v0.3.0 | Field Notes recordings (3 best, 3 latest); `-forbid` skips binary files |
 | v0.2.0 | Field Notes: an illustrated report page and PDF |
 | v0.1.0 | First public release (see [CHANGELOG](CHANGELOG.md)) |

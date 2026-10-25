@@ -103,7 +103,7 @@ flowchart LR
 
 ## Field Notes: an illustrated report
 
-A second, different way to share the station. Instead of copying the app, `birdnet-snapshot report` writes an editorial **report page and a PDF** about the last N days: a cover with the most-heard bird, the period in brief (written from the numbers), a 24-hour dial and a species-by-hour heatmap, photo cards for the regulars, new arrivals and the least expected visitors, a day-by-day chart, the full species list, and photo credits.
+A second, different way to share the station. Instead of copying the app, `birdnet-snapshot report` writes an editorial **report page and a PDF** about the last N days: a cover with the most-heard bird, the period in brief (written from the numbers), playable recordings, a 24-hour dial and a species-by-hour heatmap, photo cards for the regulars, new arrivals and the least expected visitors, a day-by-day chart, the full species list, and photo credits.
 
 <table>
 <tr>
@@ -111,10 +111,13 @@ A second, different way to share the station. Instead of copying the app, `birdn
 <td width="45%"><img src="docs/images/fieldnotes-cards.jpg" alt="Field Notes species cards with photos and hourly activity"/></td>
 </tr>
 <tr>
-<td colspan="2"><img src="docs/images/fieldnotes-pdf.jpg" alt="The Field Notes PDF, seven Letter pages"/></td>
+<td colspan="2"><img src="docs/images/fieldnotes-pdf.jpg" alt="The Field Notes PDF, printed on Letter pages"/></td>
 </tr>
 <tr>
-<td colspan="2" align="center"><sub>The web page (top) and the PDF it prints to (bottom)</sub></td>
+<td colspan="2"><img src="docs/images/fieldnotes-listen.jpg" alt="Field Notes Listen section: the best and the latest recordings as playable spectrograms"/></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><sub>The web page, the PDF it prints to, and the Listen section</sub></td>
 </tr>
 </table>
 
@@ -127,9 +130,10 @@ set -a; . ./notes.env; set +a; birdnet-snapshot report -out field-notes -deploy 
 
 - **The page** is a SvelteKit app built into `report/dist` and embedded in the binary, so nothing needs Node at run time. Fonts are bundled; the page makes no third-party requests and carries a hash-pinned CSP.
 - **Photos** are 900 px images from [Avicommons](https://avicommons.org) (credited, with their licenses), fetched once per build and published with the report; BirdNET-Go's own image is the fallback. `-photos=false` uses only BirdNET-Go's.
+- **Recordings:** the 3 best clips of the period (models agreeing first, then confidence) and the 3 latest, one per species in each list, each a spectrogram you can tap to play from that point. Clips follow the snapshot's rules: none from `-skip-audio` sources, none with `-no-audio`, none marked false positive in BirdNET-Go, none below `-clip-min` confidence (0.5). `-clips 0` leaves the section out. The PDF shows the spectrograms.
 - **The PDF** is the same page printed by headless Chrome with a print stylesheet (US Letter, covers and sections on their own pages, nine species cards per page). `-pdf=false` skips it.
-- **On a schedule:** [`deploy/systemd/birdnet-report.{service,timer}`](deploy/systemd/) rebuild and publish the report every 6 hours from `~/.config/birdnet-report/env` (start from [`deploy/report.env.example`](deploy/report.env.example), with its own storage zone). Only changed files are uploaded, so a run with no new birds costs almost nothing. It sits beside the snapshot timer; its Chrome uses port 9223. Setup is under [systemd timer with the binary](#running-it-on-a-schedule).
-- **Privacy:** only aggregate counts per species and hour. No coordinates (they are never copied from BirdNET-Go), no audio, no source names; night is a fixed 7 pm–6 am window because real sunrise times would reveal latitude. A station younger than the period gets a report covering only the days it listened.
+- **On a schedule:** [`deploy/systemd/birdnet-report.{service,timer}`](deploy/systemd/) rebuild and publish the report every hour from `~/.config/birdnet-report/env` (start from [`deploy/report.env.example`](deploy/report.env.example), with its own storage zone). Only changed files are uploaded (a few MB when the latest recordings change). It sits beside the snapshot timer; its Chrome uses port 9223. Setup is under [systemd timer with the binary](#running-it-on-a-schedule).
+- **Privacy:** aggregate counts per species and hour plus the six clips above. No coordinates (they are never copied from BirdNET-Go), no source names, `-forbid` checked against the report data; night is a fixed 7 pm–6 am window because real sunrise times would reveal latitude. A station younger than the period gets a report covering only the days it listened.
 
 ## Install
 
@@ -137,7 +141,7 @@ set -a; . ./notes.env; set +a; birdnet-snapshot report -out field-notes -deploy 
 
 ```sh
 # pick your platform from https://github.com/ParkWardRR/birdnet-snapshot/releases
-v=0.2.0
+v=0.3.0
 curl -L https://github.com/ParkWardRR/birdnet-snapshot/releases/download/v$v/birdnet-snapshot_${v}_linux_amd64.tar.gz | tar -xz
 sudo install birdnet-snapshot_${v}_linux_amd64/birdnet-snapshot /usr/local/bin/
 ```
@@ -158,7 +162,7 @@ docker pull ghcr.io/parkwardrr/birdnet-snapshot:latest
 birdnet-snapshot check -birdnet http://127.0.0.1:8080
 ```
 ```
-birdnet-snapshot v0.2.0 check
+birdnet-snapshot v0.3.0 check
   ✓ birdnet    http://127.0.0.1:8080, BirdNET-Go 20261014
   ✓ chrome     Chrome/157.0.8103.15 (launched)
   - bunny      not configured (BUNNY_STORAGE_ZONE / BUNNY_STORAGE_KEY); crawl and serve still work
@@ -221,7 +225,7 @@ volumes:
 <details>
 <summary><b>systemd timer with the binary</b></summary>
 
-[`deploy/systemd/`](deploy/systemd/): oneshot services plus timers, hourly for the snapshot and every 6 hours for Field Notes. Chrome runs as a throwaway container with DevTools bound to `127.0.0.1`, so the host needs only podman.
+[`deploy/systemd/`](deploy/systemd/): oneshot services plus timers, both hourly (Field Notes at :25, after the snapshot starts at :07). Chrome runs as a throwaway container with DevTools bound to `127.0.0.1`, so the host needs only podman.
 
 ```sh
 install -m 755 birdnet-snapshot ~/.local/bin/
@@ -265,7 +269,7 @@ Every flag has an environment variable, handy for containers and systemd `Enviro
 | `-label` | `SNAPSHOT_LABEL` | `Snapshot` | text of the corner pill |
 | `-location` | `SNAPSHOT_LOCATION` | `hide` | coordinates in recorded data: `hide`, `coarse` (~100 km) or `keep` |
 | `-redact` | `SNAPSHOT_REDACT` | | comma-separated regexes replaced with `redacted` |
-| `-forbid` | `SNAPSHOT_FORBID` | | comma-separated regexes that fail the build if found in any published file |
+| `-forbid` | `SNAPSHOT_FORBID` | | comma-separated regexes that fail the build if found in any published text file (images and audio are not scanned). In a systemd env file, single-quote the value: unquoted backslashes are dropped |
 | `-no-csp` | `SNAPSHOT_NO_CSP` | `false` | leave out the Content-Security-Policy |
 | `-allow-indexing` | `SNAPSHOT_ALLOW_INDEXING` | `false` | let search engines in |
 | `-min-entries` | `SNAPSHOT_MIN_ENTRIES` | `20` | refuse to build from a smaller crawl |
@@ -280,6 +284,7 @@ Every flag has an environment variable, handy for containers and systemd `Enviro
 | | `TZ` | auto-detected | BirdNET-Go's timezone |
 | `-title`, `-subtitle`, `-station` | `REPORT_TITLE`, `REPORT_SUBTITLE`, `REPORT_STATION` | Field Notes, … | `report`: cover text (keep the station vague) |
 | `-pdf`, `-photos`, `-deploy` | `REPORT_PDF`, `REPORT_PHOTOS`, `REPORT_DEPLOY` | `true`, `true`, `false` | `report`: print a PDF, fetch Avicommons photos, publish when built |
+| `-clips`, `-clip-min` | `REPORT_CLIPS`, `REPORT_CLIP_MIN` | `3`, `0.5` | `report`: best and latest recordings to publish (each list), lowest confidence allowed |
 | `-budget`, `-page-wait`, `-concurrency`, `-addr` | `SNAPSHOT_BUDGET`, … | `20m`, `20s`, `8`, `127.0.0.1:8765` | tuning |
 
 ## Privacy and safety
@@ -291,7 +296,7 @@ Every flag has an environment variable, handy for containers and systemd `Enviro
 | **Location** | BirdNET-Go puts the station's coordinates in some responses (species rarity, for one). `-location hide` (default) removes every `lat`/`lon`/`latitude`/`longitude` field; `coarse` rounds to whole degrees (~100 km); `keep` leaves them. Sunrise/sunset times and the species list still hint at a region, as on any bird site |
 | **Audio** | For detections from sources matching `-skip-audio` (or of unknown source) the clip **and the spectrograms** are withheld (a spectrogram is a picture of the audio and can be turned back into rough sound), including anything the browser preloaded, and their `clipName` is blanked so the UI shows them without a player. `-no-audio` does this for every detection |
 | **Stream URLs** | `rtsp://user:pass@host/path` in any response becomes `stream/path` |
-| **Your own secrets** | `-redact 'home\.lan,secret-word'` replaces matches in recorded data. `-forbid 'home\.lan,192\.168\.[0-9]+\.[0-9]+'` fails the build if any published file still contains a match |
+| **Your own secrets** | `-redact 'home\.lan,secret-word'` replaces matches in recorded data. `-forbid 'home\.lan,192\.168\.[0-9]+\.[0-9]+'` fails the build if any published text file still contains a match (binary files are skipped: their bytes match such patterns by chance) |
 | **Content-Security-Policy** | `default-src 'self'`, scripts from the site plus the shell's inline scripts by SHA-256, no third-party requests, no frames, plugins or form posts (`-no-csp` to drop it) |
 | **Edge headers** (`bunny-setup`) | `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` + `frame-ancestors 'none'`, `Referrer-Policy: no-referrer`, a deny-all `Permissions-Policy`, `Cross-Origin-Opener-Policy` and `-Resource-Policy: same-origin`. `POST`/`PUT`/`PATCH`/`DELETE` are blocked at the CDN; TLS 1.0/1.1 are off |
 | **Indexing** | `noindex, nofollow` meta and a deny-all `robots.txt` unless `-allow-indexing` |

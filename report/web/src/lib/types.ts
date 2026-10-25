@@ -31,6 +31,17 @@ export interface Species {
 	photo?: Photo;
 }
 
+export interface Recording {
+	common: string;
+	scientific: string;
+	code: string;
+	confidence: number;
+	time: string;
+	models: number;
+	audio: string;
+	spectrogram?: string;
+}
+
 export interface Report {
 	version: string;
 	generatedAt: string;
@@ -53,4 +64,5 @@ export interface Report {
 	daily: { date: string; detections: number; species: number }[];
 	species: Species[];
 	highlights: string[];
+	recordings?: { best: Recording[]; recent: Recording[] };
 }

@@ -1,8 +1,8 @@
 [Unit]
-Description=Field Notes every 6 hours
+Description=Hourly Field Notes
 
 [Timer]
-OnCalendar=*-*-* 00/6:25:00
+OnCalendar=*-*-* *:25:00
 Persistent=true
 RandomizedDelaySec=2m
 

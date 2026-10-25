@@ -6,6 +6,7 @@
 	import Heatmap from '../lib/components/Heatmap.svelte';
 	import DailyBars from '../lib/components/DailyBars.svelte';
 	import SpeciesCard from '../lib/components/SpeciesCard.svelte';
+	import RecordingCard from '../lib/components/RecordingCard.svelte';
 
 	let report = $state<Report | null>(null);
 	let failed = $state(false);
@@ -34,6 +35,10 @@
 	const credits = $derived(
 		report ? report.species.filter((s) => s.photo?.author).map((s) => ({ s, p: s.photo! })) : []
 	);
+	// Sections after "Listen" move up a numeral when there are no recordings.
+	const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
+	const numeral = (n: number) => ROMAN[n - 1 - (report?.recordings ? 0 : 1)];
+	const photoOf = (sci: string) => report?.species.find((s) => s.scientific === sci)?.photo;
 	const pdfName = $derived(report ? `field-notes-${report.period.end}.pdf` : 'field-notes.pdf');
 
 	onMount(async () => {
@@ -111,8 +116,35 @@
 			</ol>
 		</section>
 
+		{#if report.recordings}
+			<section class="listen">
+				<h2><span class="num">II</span> Listen</h2>
+				<p class="dek">
+					Recordings straight from the station: the clearest calls of the period, and the latest birds it heard.
+					Tap a spectrogram to play from that point.
+				</p>
+				{#if report.recordings.best.length}
+					<h3>Best recordings</h3>
+					<div class="recs">
+						{#each report.recordings.best as r (r.audio)}
+							<RecordingCard {r} photo={photoOf(r.scientific)} eager={printMode} />
+						{/each}
+					</div>
+				{/if}
+				{#if report.recordings.recent.length}
+					<h3>Just heard</h3>
+					<div class="recs">
+						{#each report.recordings.recent as r (r.audio)}
+							<RecordingCard {r} photo={photoOf(r.scientific)} eager={printMode} />
+						{/each}
+					</div>
+				{/if}
+				<p class="print-only listen-note">The recordings play on the web edition of these notes.</p>
+			</section>
+		{/if}
+
 		<section class="rhythm">
-			<h2><span class="num">II</span> Twenty-four hours</h2>
+			<h2><span class="num">{numeral(3)}</span> Twenty-four hours</h2>
 			<p class="dek">
 				When the station heard birds, hour by hour across {report.period.days} days. Indigo marks the
 				hours between 7 pm and 6 am, when {pct(report.totals.nightShare)} of all detections happened.
@@ -127,7 +159,7 @@
 		</section>
 
 		<section class="regulars page-break">
-			<h2><span class="num">III</span> The regulars</h2>
+			<h2><span class="num">{numeral(4)}</span> The regulars</h2>
 			<p class="dek">The {regulars.length} most-heard species, with the hours they called.</p>
 			<div class="cards">
 				{#each regulars as s, i (s.code)}
@@ -137,7 +169,7 @@
 		</section>
 
 		<section class="notable page-break">
-			<h2><span class="num">IV</span> Worth noting</h2>
+			<h2><span class="num">{numeral(5)}</span> Worth noting</h2>
 			<div class="notes">
 				{#if newcomers.length}
 					<div class="note">
@@ -199,7 +231,7 @@
 		</section>
 
 		<section class="days-sec">
-			<h2><span class="num">V</span> Day by day</h2>
+			<h2><span class="num">{numeral(6)}</span> Day by day</h2>
 			<p class="dek">
 				Detections per day and how many species made them. The busiest day was
 				{day(report.totals.busiestDay, { weekday: 'long', month: 'long', day: 'numeric' })}.
@@ -208,7 +240,7 @@
 		</section>
 
 		<section class="list">
-			<h2><span class="num">VI</span> Every species</h2>
+			<h2><span class="num">{numeral(7)}</span> Every species</h2>
 			<table>
 				<thead>
 					<tr>
@@ -491,6 +523,20 @@
 		break-inside: avoid;
 	}
 
+	/* Recordings */
+	.listen h3 {
+		margin: 1.4rem 0 0.8rem;
+	}
+	.recs {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+		gap: 1.3rem;
+	}
+	.listen-note {
+		font: italic 400 0.8rem var(--serif);
+		color: var(--muted);
+	}
+
 	/* Cards */
 	.cards {
 		display: grid;
@@ -676,6 +722,17 @@
 		}
 		.brief ol {
 			grid-template-columns: 1fr 1fr;
+		}
+		.recs {
+			grid-template-columns: repeat(3, 1fr);
+			gap: 0.7rem;
+		}
+		.listen h3 {
+			margin: 0.8rem 0 0.5rem;
+		}
+		/* Listen fills the rest of page 2; the clock and heatmap start page 3. */
+		.listen + .rhythm {
+			break-before: page;
 		}
 	}
 </style>

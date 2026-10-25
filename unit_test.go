@@ -620,6 +620,29 @@ func TestForbidFailsBuild(t *testing.T) {
 	}
 }
 
+// The bytes that matched on rifugio: a spectrogram PNG whose compressed data
+// held "172416/24*53", which `172.16.[0-9]+.[0-9]+` (dots unescaped by
+// systemd) matches. Binary files are not scanned; text still is.
+func TestForbidIgnoresBinary(t *testing.T) {
+	r, err := newRedactor(config{Forbid: []string{`172.16.[0-9]+.[0-9]+`}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	png := append([]byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"), "*(-&4 .+,*/*,00%`-5+0#,''172416/24*53<=:8=4-:388964"...)
+	if err := r.check("_snap/x.png", png); err != nil {
+		t.Errorf("binary file scanned: %v", err)
+	}
+	flac := append([]byte("fLaC\x00\x00\x00\x22\x10\x00\xff"), "172.16.4.40"...)
+	if err := r.check("_snap/x.flac", flac); err != nil {
+		t.Errorf("audio scanned: %v", err)
+	}
+	for _, text := range []string{`{"url":"http://172.16.4.40:8080"}`, `<a href="http://172.16.4.40/">x</a>`, `fetch("http://172.16.4.40")`} {
+		if err := r.check("t", []byte(text)); err == nil {
+			t.Errorf("text not scanned: %s", text)
+		}
+	}
+}
+
 func TestShellCSP(t *testing.T) {
 	src := strings.Replace(testShell, "<title>", "<script>window.__inline = 1;</script><title>", 1)
 	out, err := shell([]byte(src), false, true)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/http"
 	"regexp"
 	"strings"
 )
@@ -76,7 +77,13 @@ func (r *redactor) apply(c *capture) []byte {
 }
 
 // check returns an error naming the first forbidden pattern found in body.
+// Binary files (images, audio, fonts) are not scanned: their bytes match a
+// pattern like `172\.16\.\d+` by chance, and a spectrogram that did so failed
+// every build until its detection aged out.
 func (r *redactor) check(key string, body []byte) error {
+	if len(r.forbid) == 0 || !isText(body) {
+		return nil
+	}
 	for _, re := range r.forbid {
 		if loc := re.FindIndex(body); loc != nil {
 			start := max(0, loc[0]-30)
@@ -85,6 +92,13 @@ func (r *redactor) check(key string, body []byte) error {
 		}
 	}
 	return nil
+}
+
+// isText reports whether body sniffs as text (HTML, JSON, JS, CSS, SVG, ...).
+func isText(body []byte) bool {
+	ct := http.DetectContentType(body)
+	return strings.HasPrefix(ct, "text/") || strings.Contains(ct, "json") ||
+		strings.Contains(ct, "xml") || strings.Contains(ct, "javascript")
 }
 
 var coordKeyRe = regexp.MustCompile(`(?i)"(lat|lon|lng|latitude|longitude)"\s*:\s*-?[0-9]`)

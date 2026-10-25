@@ -2,14 +2,17 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0] - 2026-10-25
 
 ### Added
 
-- `deploy/systemd/birdnet-report.{service,timer}` and `deploy/report.env.example`: rebuild and publish Field Notes every 6 hours.
+- Field Notes **Listen** section: the 3 best recordings of the period (clips several models agreed on first, then confidence) and the 3 latest, one per species in each list. Each is a spectrogram that plays from where you tap; one clip plays at a time; the PDF prints the spectrograms. `-clips` (default 3, 0 = none) and `-clip-min` (default 0.5). `-skip-audio`, `-no-audio`, BirdNET-Go false-positive marks and unknown sources keep a clip out.
+- `deploy/systemd/birdnet-report.{service,timer}` (hourly) and `deploy/report.env.example`.
+- `-forbid` now also checks the report's `data/report.json`.
 
 ### Fixed
 
+- `-forbid` scanned binary files, so random bytes in a spectrogram PNG matched `172.16.[0-9]+.[0-9]+` and failed every snapshot build for 13 hours until fixed. Only text files are scanned now. The env examples single-quote patterns, since systemd drops unquoted backslashes (`\.` became `.`).
 - README install command pointed at the 0.1.0 tarball under `latest/`, which 404s since 0.2.0.
 
 ## [0.2.0] - 2026-10-25

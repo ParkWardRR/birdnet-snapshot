@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -58,10 +60,62 @@ func fakeAnalytics(t *testing.T, today string) *httptest.Server {
 			writeJSON(w, map[string]any{"authorName": "A. Photographer", "licenseName": "CC0", "sourceProvider": "avicommons"})
 		case "/api/v2/detections/recent":
 			writeJSON(w, []map[string]any{{"timestamp": today + "T07:30:00-07:00"}})
+		case "/api/v2/detections":
+			dets := reportDetections(today)
+			if q.Get("sortBy") == "confidence_desc" {
+				sort.SliceStable(dets, func(i, j int) bool { return dets[i]["confidence"].(float64) > dets[j]["confidence"].(float64) })
+			} else {
+				sort.SliceStable(dets, func(i, j int) bool { return dets[i]["id"].(int) > dets[j]["id"].(int) })
+			}
+			if q.Get("offset") != "0" {
+				dets = nil
+			}
+			writeJSON(w, map[string]any{"data": dets, "total": len(dets)})
 		default:
+			if id, ok := strings.CutPrefix(r.URL.Path, "/api/v2/audio/"); ok && id != "20" {
+				w.Header().Set("Content-Type", "audio/flac")
+				_, _ = w.Write([]byte("fLaC-" + id + "-" + strings.Repeat("x", 2048)))
+				return
+			}
+			if id, ok := strings.CutPrefix(r.URL.Path, "/api/v2/spectrogram/"); ok && id != "16" {
+				w.Header().Set("Content-Type", "image/png")
+				_, _ = w.Write([]byte("png-" + id))
+				return
+			}
 			http.NotFound(w, r)
 		}
 	}))
+}
+
+// reportDetections covers every reason a clip is or is not published.
+func reportDetections(today string) []map[string]any {
+	det := func(id int, sci, common, src string, conf float64, models int, verified, clip string) map[string]any {
+		m := make([]map[string]any, models)
+		for i := range m {
+			m[i] = map[string]any{"modelName": fmt.Sprint("m", i)}
+		}
+		return map[string]any{
+			"id": id, "timestamp": fmt.Sprintf("%sT07:%02d:00-07:00", today, id), "scientificName": sci, "commonName": common,
+			"speciesCode": "x", "confidence": conf, "clipName": clip, "verified": verified, "modelContributions": m,
+			"source": map[string]any{"id": "rtsp://cam/" + strings.ToLower(src), "displayName": src},
+		}
+	}
+	const finch, owl, sparrow = "Haemorhous mexicanus", "Bubo virginianus", "Ammospiza nelsoni"
+	return []map[string]any{
+		det(11, finch, "House Finch", "Doorbell", 0.99, 3, "unverified", "a.flac"),                // private source
+		det(12, owl, "Great Horned Owl", "Alley", 0.98, 3, "false_positive", "a.flac"),            // marked wrong
+		det(17, "Turdus migratorius", "American Robin", "Alley", 0.97, 3, "unverified", "a.flac"), // not in the report
+		det(14, finch, "House Finch", "Alley", 0.95, 1, "unverified", "a.flac"),                   // tie, fewer models
+		det(13, finch, "House Finch", "Alley", 0.95, 2, "correct", "a.flac"),                      // best 1
+		det(9, owl, "Great Horned Owl", "Alley", 0.96, 1, "unverified", "a.flac"),                 // best 2: one model, so after 13
+		det(15, sparrow, "Nelson's Sparrow", "Alley", 0.6, 1, "unverified", ""),                   // no clip
+		det(16, sparrow, "Nelson's Sparrow", "Garage", 0.5, 1, "unverified", "a.flac"),            // best 3, no spectrogram
+		det(18, owl, "Great Horned Owl", "Garage", 0.4, 1, "unverified", "a.flac"),                // owl taken by 9
+		det(20, finch, "House Finch", "Alley", 0.35, 1, "unverified", "a.flac"),                   // newest; clip not written yet
+		det(21, owl, "Great Horned Owl", "Alley", 0.3, 1, "unverified", "a.flac"),                 // recent 1
+		det(19, finch, "House Finch", "Alley", 0.3, 1, "unverified", "a.flac"),                    // recent 2 (18 is used)
+		det(10, sparrow, "Nelson's Sparrow", "Alley", 0.3, 1, "unverified", "a.flac"),             // recent 3
+	}
 }
 
 func TestBuildReport(t *testing.T) {
@@ -72,8 +126,8 @@ func TestBuildReport(t *testing.T) {
 	defer srv.Close()
 
 	out := filepath.Join(t.TempDir(), "report")
-	c := config{BirdNET: srv.URL, Out: out}
-	rc := reportConfig{Title: "Field Notes", Subtitle: "s", Station: "A station", Days: 7}
+	c := config{BirdNET: srv.URL, Out: out, SkipAudio: []string{"doorbell"}}
+	rc := reportConfig{Title: "Field Notes", Subtitle: "s", Station: "A station", Days: 7, Clips: 3}
 	if err := buildReport(context.Background(), c, rc); err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +168,74 @@ func TestBuildReport(t *testing.T) {
 	}
 	if d.PDF != "" {
 		t.Error("PDF was off")
+	}
+
+	// Recordings: the private source, the false positive, the clipless, the
+	// unlisted species and the unwritten clip are passed over; one per species.
+	if d.Recordings == nil {
+		t.Fatal("no recordings")
+	}
+	clipID := func(r reportClip) string {
+		b, err := os.ReadFile(filepath.Join(out, filepath.FromSlash(r.Audio)))
+		if err != nil {
+			return "missing"
+		}
+		id, _, _ := strings.Cut(strings.TrimPrefix(string(b), "fLaC-"), "-")
+		return id
+	}
+	ids := func(rs []reportClip) string {
+		var s []string
+		for _, r := range rs {
+			s = append(s, clipID(r))
+		}
+		return strings.Join(s, ",")
+	}
+	if got := ids(d.Recordings.Best); got != "13,9,16" {
+		t.Errorf("best clips %s, want 13,9,16", got)
+	}
+	if got := ids(d.Recordings.Recent); got != "21,19,10" {
+		t.Errorf("recent clips %s, want 21,19,10", got)
+	}
+	b0 := d.Recordings.Best[0]
+	if b0.Common != "House Finch" || b0.Models != 2 || b0.Confidence != 0.95 || !strings.HasSuffix(b0.Audio, ".flac") || !strings.HasSuffix(b0.Spectrogram, ".png") {
+		t.Errorf("best clip %+v", b0)
+	}
+	if d.Recordings.Best[2].Spectrogram != "" {
+		t.Errorf("spectrogram that 404s should be left out: %+v", d.Recordings.Best[2])
+	}
+	if strings.Contains(string(raw), "Doorbell") || strings.Contains(string(raw), "rtsp") || strings.Contains(string(raw), "Garage") {
+		t.Errorf("source names leaked into the report: %s", raw)
+	}
+
+	// A confidence floor drops the weak clips from both lists.
+	rc.ClipMin = 0.45
+	if err := buildReport(context.Background(), c, rc); err != nil {
+		t.Fatal(err)
+	}
+	readJSON(t, filepath.Join(out, "data", "report.json"), &d)
+	if b, r := ids(d.Recordings.Best), ids(d.Recordings.Recent); b != "13,9,16" || r != "14" {
+		t.Errorf("with -clip-min 0.45: best %s recent %s, want 13,9,16 and 14", b, r)
+	}
+
+	// -clips 0 and -no-audio publish none.
+	for _, cc := range []struct {
+		c  config
+		rc reportConfig
+	}{
+		{config{BirdNET: srv.URL, Out: out}, reportConfig{Days: 7}},
+		{config{BirdNET: srv.URL, Out: out, NoAudio: true}, reportConfig{Days: 7, Clips: 3}},
+	} {
+		if err := buildReport(context.Background(), cc.c, cc.rc); err != nil {
+			t.Fatal(err)
+		}
+		var d2 reportData
+		readJSON(t, filepath.Join(out, "data", "report.json"), &d2)
+		if d2.Recordings != nil {
+			t.Errorf("recordings published with clips=%d noAudio=%v", cc.rc.Clips, cc.c.NoAudio)
+		}
+		if m, _ := filepath.Glob(filepath.Join(out, "_snap", "*.flac")); len(m) > 0 {
+			t.Errorf("audio files written: %v", m)
+		}
 	}
 }
 

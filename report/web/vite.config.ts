@@ -21,6 +21,7 @@ export default defineConfig({
 					'script-src': ['self'],
 					'style-src': ['self', 'unsafe-inline'],
 					'img-src': ['self', 'data:'],
+					'media-src': ['self'],
 					'font-src': ['self', 'data:'],
 					'connect-src': ['self'],
 					'object-src': ['none'],

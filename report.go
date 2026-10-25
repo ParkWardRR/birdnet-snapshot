@@ -27,18 +27,19 @@ var reportFS embed.FS
 
 // reportData is data/report.json, everything the report page renders.
 type reportData struct {
-	Version     string          `json:"version"`
-	GeneratedAt time.Time       `json:"generatedAt"`
-	Title       string          `json:"title"`
-	Subtitle    string          `json:"subtitle"`
-	Station     string          `json:"station"`
-	Period      reportPeriod    `json:"period"`
-	PDF         string          `json:"pdf,omitempty"`
-	Totals      reportTotals    `json:"totals"`
-	Hourly      []int           `json:"hourly"`
-	Daily       []reportDay     `json:"daily"`
-	Species     []reportSpecies `json:"species"`
-	Highlights  []string        `json:"highlights"`
+	Version     string            `json:"version"`
+	GeneratedAt time.Time         `json:"generatedAt"`
+	Title       string            `json:"title"`
+	Subtitle    string            `json:"subtitle"`
+	Station     string            `json:"station"`
+	Period      reportPeriod      `json:"period"`
+	PDF         string            `json:"pdf,omitempty"`
+	Totals      reportTotals      `json:"totals"`
+	Hourly      []int             `json:"hourly"`
+	Daily       []reportDay       `json:"daily"`
+	Species     []reportSpecies   `json:"species"`
+	Highlights  []string          `json:"highlights"`
+	Recordings  *reportRecordings `json:"recordings,omitempty"`
 }
 
 type reportPeriod struct {
@@ -105,7 +106,9 @@ type reportConfig struct {
 	Days     int
 	PDF      bool
 	Deploy   bool
-	Photos   bool // fetch large photos from Avicommons
+	Photos   bool    // fetch large photos from Avicommons
+	Clips    int     // best and most recent recordings to publish (each)
+	ClipMin  float64 // lowest confidence a published recording may have
 }
 
 // buildReport gathers a period of data from BirdNET-Go and writes the report
@@ -242,7 +245,14 @@ func buildReport(ctx context.Context, c config, rc reportConfig) error {
 	if err := os.CopyFS(tmp, dist); err != nil {
 		return fmt.Errorf("copy page: %w", err)
 	}
-	if err := fetchPhotos(ctx, c, rc, d, tmp); err != nil {
+	save, err := snapSaver(tmp)
+	if err != nil {
+		return err
+	}
+	if err := fetchPhotos(ctx, c, rc, d, save); err != nil {
+		return err
+	}
+	if err := fetchRecordings(ctx, c, rc, d, save); err != nil {
 		return err
 	}
 	if err := writeReportJSON(tmp, d); err != nil {
@@ -257,6 +267,16 @@ func buildReport(ctx context.Context, c config, rc reportConfig) error {
 		if err := writeReportJSON(tmp, d); err != nil {
 			return err
 		}
+	}
+	// -forbid applies to the report data too.
+	red, err := newRedactor(c)
+	if err != nil {
+		return err
+	}
+	if b, err := os.ReadFile(filepath.Join(tmp, "data", "report.json")); err != nil {
+		return err
+	} else if err := red.check("data/report.json", b); err != nil {
+		return err
 	}
 	if err := os.RemoveAll(c.Out); err != nil {
 		return err
@@ -401,7 +421,7 @@ func highlights(d *reportData) []string {
 // fetchPhotos stores a large and a small photo per species under /_snap/,
 // named by content hash. Large photos come from Avicommons (900 px) when its
 // catalogue knows the species; otherwise BirdNET-Go's own 320 px image.
-func fetchPhotos(ctx context.Context, c config, rc reportConfig, d *reportData, dir string) error {
+func fetchPhotos(ctx context.Context, c config, rc reportConfig, d *reportData, save func([]byte, string) (string, error)) error {
 	client := &http.Client{Timeout: 60 * time.Second}
 	type avi struct {
 		Code, Key, By, License string
@@ -418,14 +438,6 @@ func fetchPhotos(ctx context.Context, c config, rc reportConfig, d *reportData, 
 		} else {
 			log.Printf("report: Avicommons catalogue unavailable (%v); using BirdNET-Go photos", err)
 		}
-	}
-	if err := os.MkdirAll(filepath.Join(dir, "_snap"), 0o755); err != nil {
-		return err
-	}
-	save := func(b []byte, ext string) (string, error) {
-		sum := sha256.Sum256(b)
-		name := "_snap/" + hex.EncodeToString(sum[:10]) + ext
-		return "/" + name, os.WriteFile(filepath.Join(dir, filepath.FromSlash(name)), b, 0o644)
 	}
 	for i := range d.Species {
 		sp := &d.Species[i]
@@ -466,6 +478,19 @@ func fetchPhotos(ctx context.Context, c config, rc reportConfig, d *reportData, 
 		sp.Photo = &reportPhoto{Large: name, Small: name, Author: info.Author, License: info.License, LicenseURL: info.LicenseURL, Source: orDefault(info.Source, "BirdNET-Go")}
 	}
 	return nil
+}
+
+// snapSaver returns a function that stores a file under dir/_snap/, named by
+// its content hash, and returns its site path.
+func snapSaver(dir string) (func([]byte, string) (string, error), error) {
+	if err := os.MkdirAll(filepath.Join(dir, "_snap"), 0o755); err != nil {
+		return nil, err
+	}
+	return func(b []byte, ext string) (string, error) {
+		sum := sha256.Sum256(b)
+		name := "_snap/" + hex.EncodeToString(sum[:10]) + ext
+		return "/" + name, os.WriteFile(filepath.Join(dir, filepath.FromSlash(name)), b, 0o644)
+	}, nil
 }
 
 func writeReportJSON(dir string, d *reportData) error {

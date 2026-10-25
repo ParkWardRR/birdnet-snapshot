@@ -41,6 +41,12 @@ body {
 	margin: 12mm 12mm 14mm;
 }
 
+@media screen {
+	.print-only {
+		display: none !important;
+	}
+}
+
 @media print {
 	html {
 		font-size: 13px;
