@@ -1,0 +1,11 @@
+# User unit: ~/.config/systemd/user/birdnet-rare.service
+# Looks at the last 90 minutes; pushes a rare visitor to ntfy once per day.
+[Unit]
+Description=Alert on rare BirdNET-Go visitors
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/birdnet-notify/env
+ExecStart=%h/.local/bin/birdnet-snapshot rare
+Nice=10

@@ -2,6 +2,14 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [0.6.0] - 2026-10-28
+
+### Added
+
+- `audit`: a nightly check for the signatures of a noisy microphone (a species swamping the station on thin evidence, one microphone behind most of a species or dominated by two, daytime birds heard at night, low-confidence single-model floods), pushed to ntfy once and repeated weekly while unresolved. `-raw` replays history including reviewed detections, `-json`, `-dry`, `-metrics-file`.
+- `rare`: rare visitor alerts to ntfy: a species the range model scores as uncommon here, or never heard before, confirmed by two or more detections on two microphones, two models or at 0.9+. One alert per species per day, tap-through to the detection.
+- systemd units and `deploy/notify.env.example` for both.
+
 ## [0.5.0] - 2026-10-27
 
 ### Added

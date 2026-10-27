@@ -69,6 +69,16 @@ func main() {
 		return
 	case "help", "-h", "-help", "--help":
 		usage()
+	case "audit":
+		if err := auditMain(os.Args[2:]); err != nil {
+			log.Fatalf("audit: %v", err)
+		}
+		return
+	case "rare":
+		if err := rareMain(os.Args[2:]); err != nil {
+			log.Fatalf("rare: %v", err)
+		}
+		return
 	case "bunny-setup":
 		if err := bunnySetupMain(os.Args[2:]); err != nil {
 			log.Fatalf("bunny-setup: %v", err)

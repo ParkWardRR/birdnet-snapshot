@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily BirdNET-Go audit
+
+[Timer]
+OnCalendar=*-*-* 07:40:00
+Persistent=true
+RandomizedDelaySec=2m
+
+[Install]
+WantedBy=timers.target

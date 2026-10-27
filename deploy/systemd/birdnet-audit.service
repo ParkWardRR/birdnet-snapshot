@@ -1,0 +1,14 @@
+# User unit: ~/.config/systemd/user/birdnet-audit.service
+# One audit of the last 48 h of detections; pushes new findings to ntfy.
+#
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now birdnet-audit.timer birdnet-rare.timer
+[Unit]
+Description=Audit BirdNET-Go detections for noisy-microphone patterns
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/birdnet-notify/env
+ExecStart=%h/.local/bin/birdnet-snapshot audit
+Nice=10

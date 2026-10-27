@@ -140,6 +140,33 @@ set -a; . ./notes.env; set +a; birdnet-snapshot report -out field-notes -deploy 
 - **On a schedule:** [`deploy/systemd/birdnet-report.{service,timer}`](deploy/systemd/) rebuild and publish the report every hour from `~/.config/birdnet-report/env` (start from [`deploy/report.env.example`](deploy/report.env.example), with its own storage zone). Only changed files are uploaded (a few MB when the latest recordings change). It sits beside the snapshot timer; its Chrome uses port 9223. Setup is under [systemd timer with the binary](#running-it-on-a-schedule).
 - **Privacy:** aggregate counts per species and hour plus the six clips above. The dawn-onset panels are the one part that depends on the station location: BirdNET-Go works out civil dawn from its coordinates, and only each species' offset in minutes is copied, never the dawn time or the coordinates. Offsets next to the hourly charts could still hint roughly at the region, so `-dawn=false` leaves them out. No coordinates (they are never copied from BirdNET-Go), no source names, `-forbid` checked against the report data; night is a fixed 7 pm–6 am window because real sunrise times would reveal latitude. A station younger than the period gets a report covering only the days it listened.
 
+## Watching the station: audit and rare visitors
+
+BirdNET-Go's models misfire on a microphone's noise (hum, a ticking sprinkler, a door), and the dynamic threshold then lowers the bar for that species for a day. One bad species can become a third of the station's detections without anyone noticing. Two commands watch for that and push to [ntfy](https://ntfy.sh). Neither changes anything in BirdNET-Go.
+
+**`audit`** reads the last 48 hours (once a night) and flags what a person would look at:
+
+| Check | Flags | Why |
+|---|---|---|
+| Dominant species | one species over 25% of detections **and** thin evidence (mean confidence under 0.55 or under 40% confirmed by two models) | a real House Finch can be 30% of a young station; a Raven heard on every hour of the night with 0.46 confidence is not |
+| One microphone | a species with 70%+ of its detections from one microphone, where it is 30%+ of everything that microphone heard, again with thin evidence | birds roam; a noise source stays put |
+| Dominated microphone | a microphone whose detections are 60%+ two species, one with thin evidence | the same, seen from the microphone |
+| Night-time daytime bird | 3+ detections, at least half of them between 7 pm and 6 am, from a species that is not an owl, nightjar, night heron, rail or the like (`AUDIT_NOCTURNAL` adds more) | hummingbirds do not call in the dark |
+| Low-confidence flood | 50+ detections, median confidence under 0.45, under 40% confirmed by two models | the signature of a lowered dynamic threshold |
+
+A finding is sent once and repeated weekly while it stays unresolved; when it goes away and returns, it is sent again. Detections you mark as false positives leave the picture, so a fixed problem stops appearing. `-raw` counts them anyway, which replays history: on the station this was written for, it would have flagged the Great Horned Owl (44% of everything, median confidence 0.43) and the Raven (83% from one microphone) on day two. `-json`, `-dry` and `-metrics-file` (`birdnet_audit_findings{check=...}`, `birdnet_audit_warnings`, last-success time) are there for scripting and alerting.
+
+**`rare`** runs every 15 minutes over the last 90 minutes and pushes a *rare visitor*: a species the range model scores under 0.5 for your location (uncommon or rarer), or one the station has never heard and scores under 0.8, with more than a lone hit behind it. That means two or more detections of 0.6+ confidence, and either two microphones, two agreeing models or 0.9+. Lone hits wait for a second one, because noise rarely repeats on a second microphone. One alert per species per day; tapping it opens the best detection in BirdNET-Go (`BIRDNET_LINK`).
+
+```sh
+export NTFY_URL=https://ntfy.example.com/birds BIRDNET_LINK=https://birdnet.example.com
+birdnet-snapshot audit -dry            # what would be said, nothing sent
+birdnet-snapshot audit -hours 120 -raw -dry   # replay everything, reviewed or not
+birdnet-snapshot rare -dry
+```
+
+Run them from [`deploy/systemd/birdnet-audit.*` and `birdnet-rare.*`](deploy/systemd/) with settings from [`deploy/notify.env.example`](deploy/notify.env.example).
+
 ## Install
 
 **Binary** (Linux, macOS, Windows; needs Chrome or Chromium installed, or a running one via `-chrome`):
@@ -253,6 +280,8 @@ loginctl enable-linger $USER   # keep user timers running after logout
 | `serve` | preview `-out` locally with the CDN's routing rules |
 | `check` | test BirdNET-Go, Chrome and Bunny settings |
 | `report` | build Field Notes, an illustrated report page and PDF; `-deploy` publishes it |
+| `audit` | flag noisy-microphone patterns in the last 48 h and push them to ntfy; `-raw` replays history, `-dry` sends nothing |
+| `rare` | push a confirmed rare visitor to ntfy (run every 15 minutes) |
 | `bunny-setup` | create/reuse storage zone, pull zone, cache rules, security headers, write blocking, hostname, DNS, certificate. `-purge` clears the edge cache, `-delete -yes` tears it down |
 | `version` | print the version |
 

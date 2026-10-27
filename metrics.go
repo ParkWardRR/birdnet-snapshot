@@ -49,22 +49,7 @@ func writeMetrics(path string, r *runReport) error {
 	g("birdnet_snapshot_uploaded_bytes", "Bytes uploaded by the last deploy.", float64(r.Deploy.Bytes))
 	g("birdnet_snapshot_deleted_files", "Stale files deleted by the last deploy.", float64(r.Deploy.Deleted))
 
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".birdnet-snapshot-*.tmp") // not *.prom: the collector would read it
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(b.String()); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return writeTextfile(path, b.String())
 }
 
 // readGauge returns the value of an unlabelled gauge in a textfile, or 0.
@@ -83,4 +68,26 @@ func readGauge(path, name string) float64 {
 		}
 	}
 	return 0
+}
+
+// writeTextfile writes a node_exporter textfile atomically (temp file, then
+// rename) so the collector never reads a half-written file. The temp name does
+// not end in .prom, or the collector would read it.
+func writeTextfile(path, content string) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".birdnet-snapshot-*.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(content); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
