@@ -2,6 +2,22 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [0.7.0] - 2026-10-28
+
+### Added
+
+- Field Notes **week over week**: each species' change per listening day against the period before, a headline on overall activity, "Gone quiet" and "Not heard this time" lists. Needs 3+ listening days in the earlier period.
+- **Quality panel** ("How sure we are"): share of detections confirmed by two or more models, median confidence, confidence histogram, detections reviewed and removed, species to treat with caution. No microphone names.
+- **Species so far**: the species accumulation curve, from first-heard times.
+- **Weather and song** (`-weather`) and **the soundscape** (`-prometheus`): detections against the hourly temperature with rain shaded, and a sound-level heatmap by hour and octave band from BirdNET-Go's Prometheus metrics.
+- **Species view**: click a species for its hours, days, comparison and best recordings (`-species-clips`); deep link `?species=code`.
+- **Play all** for the Listen section, on one shared audio player (one clip at a time everywhere, Safari-safe).
+- `tests/browsers/shots`: element screenshots for README images.
+
+### Changed
+
+- The report now fetches the period's detections once and shares them between the quality panel, the recordings and the species clips.
+
 ## [0.6.0] - 2026-10-28
 
 ### Added

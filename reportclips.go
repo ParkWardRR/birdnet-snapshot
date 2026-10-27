@@ -2,13 +2,12 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -50,52 +49,48 @@ type apiDetection struct {
 	} `json:"modelContributions"`
 }
 
-// clipCandidates is how many detections each list looks through.
-const clipCandidates = 1000
-
-// fetchRecordings picks rc.Clips best and rc.Clips most recent recordings and
-// stores their audio and spectrogram under /_snap/. The same privacy rules as
-// the snapshot apply: nothing with c.NoAudio, nothing from a source in
-// c.SkipAudio or an unknown source, nothing marked a false positive, and only
-// species the report lists, at -clip-min confidence or better.
-func fetchRecordings(ctx context.Context, c config, rc reportConfig, d *reportData, save func([]byte, string) (string, error)) error {
-	if rc.Clips <= 0 || c.NoAudio {
-		return nil
-	}
-	client := &http.Client{Timeout: 60 * time.Second}
+// clipEligible says whether a detection's clip may be published: it has a
+// clip, was not thrown out as a false positive, belongs to a species the
+// report lists, reaches -clip-min, and does not come from a withheld source
+// (c.SkipAudio, or an unknown one). c.NoAudio publishes none.
+func clipEligible(c config, rc reportConfig, d *reportData) func(apiDetection) bool {
 	listed := map[string]bool{}
 	for _, sp := range d.Species {
 		listed[sp.Scientific] = true
 	}
-	list := func(sortBy string) ([]apiDetection, error) {
-		var out []apiDetection
-		for offset := 0; offset < clipCandidates; offset += 500 {
-			q := url.Values{
-				"queryType": {"all"}, "start_date": {d.Period.Start}, "end_date": {d.Period.End},
-				"numResults": {"500"}, "offset": {fmt.Sprint(offset)}, "sortBy": {sortBy},
-			}
-			b, _, err := get(ctx, client, c.BirdNET+"/api/v2/detections?"+q.Encode())
-			if err != nil {
-				return nil, err
-			}
-			var page struct {
-				Data  []apiDetection `json:"data"`
-				Total int            `json:"total"`
-			}
-			if err := json.Unmarshal(b, &page); err != nil {
-				return nil, err
-			}
-			out = append(out, page.Data...)
-			if len(page.Data) < 500 || offset+500 >= page.Total {
-				break
-			}
-		}
-		return out, nil
-	}
-	eligible := func(x apiDetection) bool {
-		return x.ClipName != "" && x.Verified != "false_positive" && listed[x.Sci] && x.Confidence >= rc.ClipMin &&
+	return func(x apiDetection) bool {
+		return !c.NoAudio && x.ClipName != "" && !x.isRemoved() && listed[x.Sci] && x.Confidence >= rc.ClipMin &&
 			!skipSource(strings.ToLower(x.Source.ID+" "+x.Source.DisplayName), c.SkipAudio)
 	}
+}
+
+// bestFirst orders detections for "best recording" picks: clips two or more
+// models agreed on first (many single-model hits reach 1.0 too), then
+// confidence, then the number of models.
+func bestFirst(ds []apiDetection) []apiDetection {
+	out := append([]apiDetection(nil), ds...)
+	sort.SliceStable(out, func(i, j int) bool {
+		ai, aj := out[i].multi(), out[j].multi()
+		if ai != aj {
+			return ai
+		}
+		if out[i].Confidence != out[j].Confidence {
+			return out[i].Confidence > out[j].Confidence
+		}
+		return len(out[i].Models) > len(out[j].Models)
+	})
+	return out
+}
+
+// fetchRecordings picks rc.Clips best and rc.Clips most recent recordings from
+// the period's detections and stores their audio and spectrogram under /_snap/,
+// one per species in each list.
+func fetchRecordings(ctx context.Context, c config, rc reportConfig, d *reportData, dets []apiDetection, save func([]byte, string) (string, error)) error {
+	if rc.Clips <= 0 || c.NoAudio {
+		return nil
+	}
+	client := &http.Client{Timeout: 60 * time.Second}
+	eligible := clipEligible(c, rc, d)
 	used := map[int64]bool{}
 	pick := func(cands []apiDetection) []reportClip {
 		var out []reportClip
@@ -116,33 +111,60 @@ func fetchRecordings(ctx context.Context, c config, rc reportConfig, d *reportDa
 		}
 		return out
 	}
-
-	best, err := list("confidence_desc")
-	if err != nil {
-		return fmt.Errorf("detections by confidence: %w", err)
-	}
-	// Clips that two or more models agreed on come first (many single-model
-	// hits reach 1.0 too), then confidence, then the number of models.
-	sort.SliceStable(best, func(i, j int) bool {
-		ai, aj := len(best[i].Models) >= 2, len(best[j].Models) >= 2
-		if ai != aj {
-			return ai
-		}
-		if best[i].Confidence != best[j].Confidence {
-			return best[i].Confidence > best[j].Confidence
-		}
-		return len(best[i].Models) > len(best[j].Models)
-	})
-	recent, err := list("date_desc")
-	if err != nil {
-		return fmt.Errorf("recent detections: %w", err)
-	}
-	r := &reportRecordings{Best: pick(best), Recent: pick(recent)}
+	recent := append([]apiDetection(nil), dets...)
+	sort.SliceStable(recent, func(i, j int) bool { return recent[i].when().After(recent[j].when()) })
+	r := &reportRecordings{Best: pick(bestFirst(dets)), Recent: pick(recent)}
 	if len(r.Best)+len(r.Recent) > 0 {
 		d.Recordings = r
 	}
 	log.Printf("report: %d best and %d recent recordings", len(r.Best), len(r.Recent))
 	return nil
+}
+
+// speciesViewTop is how many of the most-heard species get their own
+// recordings for the species view.
+const speciesViewTop = 12
+
+// fetchSpeciesClips stores up to rc.SpeciesClips of the best recordings of each
+// of the most-heard species, under the same rules as the Listen section.
+func fetchSpeciesClips(ctx context.Context, c config, rc reportConfig, d *reportData, dets []apiDetection, save func([]byte, string) (string, error)) {
+	if rc.SpeciesClips <= 0 || c.NoAudio {
+		return
+	}
+	client := &http.Client{Timeout: 60 * time.Second}
+	eligible := clipEligible(c, rc, d)
+	bySpecies := map[string][]apiDetection{}
+	for _, x := range dets {
+		bySpecies[x.Sci] = append(bySpecies[x.Sci], x)
+	}
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 4)
+	for i := 0; i < len(d.Species) && i < speciesViewTop; i++ {
+		sp := &d.Species[i]
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			for _, x := range bestFirst(bySpecies[sp.Scientific]) {
+				if len(sp.Clips) == rc.SpeciesClips {
+					return
+				}
+				if !eligible(x) {
+					continue
+				}
+				if clip, err := storeClip(ctx, client, c, x, save); err == nil {
+					sp.Clips = append(sp.Clips, clip)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	n := 0
+	for _, sp := range d.Species {
+		n += len(sp.Clips)
+	}
+	log.Printf("report: %d recordings for the species views", n)
 }
 
 // storeClip saves one detection's audio (required) and spectrogram (if

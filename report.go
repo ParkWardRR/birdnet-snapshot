@@ -41,6 +41,11 @@ type reportData struct {
 	Highlights  []string          `json:"highlights"`
 	Recordings  *reportRecordings `json:"recordings,omitempty"`
 	Dawn        *reportDawn       `json:"dawn,omitempty"`
+	Compare     *reportCompare    `json:"compare,omitempty"`
+	Quality     *reportQuality    `json:"quality,omitempty"`
+	Growth      *reportGrowth     `json:"growth,omitempty"`
+	Weather     *reportWeather    `json:"weather,omitempty"`
+	Soundscape  *reportSoundscape `json:"soundscape,omitempty"`
 }
 
 type reportPeriod struct {
@@ -88,6 +93,9 @@ type reportSpecies struct {
 	RarityScore   float64      `json:"rarityScore,omitempty"`
 	IsNew         bool         `json:"isNew"`
 	Photo         *reportPhoto `json:"photo,omitempty"`
+	Prev          int          `json:"prev,omitempty"`   // detections in the period before, when there is one to compare
+	Change        *float64     `json:"change,omitempty"` // per active day against that period (0.24 = up 24%)
+	Clips         []reportClip `json:"clips,omitempty"`  // best recordings, for the species' own view
 }
 
 type reportPhoto struct {
@@ -101,20 +109,28 @@ type reportPhoto struct {
 
 // reportConfig holds the report command's own settings.
 type reportConfig struct {
-	Title    string
-	Subtitle string
-	Station  string
-	Days     int
-	PDF      bool
-	Deploy   bool
-	Photos   bool    // fetch large photos from Avicommons
-	Clips    int     // best and most recent recordings to publish (each)
-	ClipMin  float64 // lowest confidence a published recording may have
-	Dawn     bool    // chart the dawn-chorus onset of the morning singers
+	Title        string
+	Subtitle     string
+	Station      string
+	Days         int
+	PDF          bool
+	Deploy       bool
+	Photos       bool    // fetch large photos from Avicommons
+	Clips        int     // best and most recent recordings to publish (each)
+	ClipMin      float64 // lowest confidence a published recording may have
+	Dawn         bool    // chart the dawn-chorus onset of the morning singers
+	Weather      bool    // chart activity against the hourly weather BirdNET-Go stores
+	SpeciesClips int     // recordings per species for the most-heard species (0 = none)
+
+	// Prometheus holds BirdNET-Go's sound-level metrics; without it there is no soundscape.
+	Prometheus     string
+	PrometheusUser string
+	PrometheusPass string
+	SoundMetric    string
 }
 
-// buildReport gathers a period of data from BirdNET-Go and writes the report
-// site (page, data, photos, PDF) to c.Out.
+// buildReport gathers the last rc.Days days from BirdNET-Go and writes the
+// report site (page, data, photos, recordings, PDF) to c.Out.
 func buildReport(ctx context.Context, c config, rc reportConfig) error {
 	start := time.Now()
 	loc, _ := serverZone(ctx, c.BirdNET)
@@ -123,6 +139,48 @@ func buildReport(ctx context.Context, c config, rc reportConfig) error {
 		rc.Days = 7
 	}
 	first := end.AddDate(0, 0, -(rc.Days - 1))
+	d, dets, err := collectReport(ctx, c, rc, loc, first, end, end)
+	if err != nil {
+		return err
+	}
+	tmp := c.Out + ".tmp"
+	if err := writeReportSite(ctx, c, rc, d, dets, tmp); err != nil {
+		return err
+	}
+	// -forbid applies to the report data too.
+	red, err := newRedactor(c)
+	if err != nil {
+		return err
+	}
+	if b, err := os.ReadFile(filepath.Join(tmp, "data", "report.json")); err != nil {
+		return err
+	} else if err := red.check("data/report.json", b); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(c.Out); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, c.Out); err != nil {
+		return err
+	}
+	log.Printf("report: %s, %d species, %d detections, built %s in %s", d.Period.Label, d.Totals.Species, d.Totals.Detections, c.Out, time.Since(start).Round(time.Second))
+	return nil
+}
+
+// daysBetween counts the calendar days from first to end, both included.
+func daysBetween(first, end time.Time) int {
+	a, _ := time.Parse("2006-01-02", first.Format("2006-01-02"))
+	b, _ := time.Parse("2006-01-02", end.Format("2006-01-02"))
+	return int(b.Sub(a).Hours()/24+0.5) + 1
+}
+
+// collectReport reads everything the report says about the days first..end
+// from BirdNET-Go: counts, hourly profiles, rarity, how the period compares
+// with the one before, quality, growth, weather and sound. It also returns the
+// period's detections, which the recordings are chosen from. now is the
+// current time in the station's zone.
+func collectReport(ctx context.Context, c config, rc reportConfig, loc *time.Location, first, end, now time.Time) (*reportData, []apiDetection, error) {
+	days := daysBetween(first, end)
 	client := &http.Client{Timeout: 60 * time.Second}
 	api := func(p string, v any) error {
 		b, _, err := get(ctx, client, c.BirdNET+"/api/v2"+p)
@@ -145,16 +203,16 @@ func buildReport(ctx context.Context, c config, rc reportConfig) error {
 		Thumbnail string  `json:"thumbnail_url"`
 	}
 	if err := api(fmt.Sprintf("/analytics/species/summary?start_date=%s&end_date=%s", first.Format("2006-01-02"), end.Format("2006-01-02")), &summary); err != nil {
-		return fmt.Errorf("species summary: %w", err)
+		return nil, nil, fmt.Errorf("species summary: %w", err)
 	}
 	if len(summary) == 0 {
-		return fmt.Errorf("no detections between %s and %s; not building a report", first.Format("2006-01-02"), end.Format("2006-01-02"))
+		return nil, nil, fmt.Errorf("no detections between %s and %s; not building a report", first.Format("2006-01-02"), end.Format("2006-01-02"))
 	}
 
 	d := &reportData{
-		Version: version, GeneratedAt: time.Now().In(loc).Truncate(time.Second),
+		Version: version, GeneratedAt: now.Truncate(time.Second),
 		Title: rc.Title, Subtitle: rc.Subtitle, Station: rc.Station,
-		Period: reportPeriod{Start: first.Format("2006-01-02"), End: end.Format("2006-01-02"), Days: rc.Days, Label: periodLabel(first, end)},
+		Period: reportPeriod{Start: first.Format("2006-01-02"), End: end.Format("2006-01-02"), Days: days, Label: periodLabel(first, end)},
 		Hourly: make([]int, 24),
 	}
 	idx := map[string]*reportSpecies{}
@@ -162,7 +220,7 @@ func buildReport(ctx context.Context, c config, rc reportConfig) error {
 		sp := &reportSpecies{
 			Code: s.Code, Common: s.Common, Scientific: s.Sci, Count: s.Count,
 			AvgConfidence: round2(s.AvgConf), MaxConfidence: round2(s.MaxConf),
-			FirstHeard: s.First, LastHeard: s.Last, Hourly: make([]int, 24), Daily: make([]int, rc.Days),
+			FirstHeard: s.First, LastHeard: s.Last, Hourly: make([]int, 24), Daily: make([]int, days),
 		}
 		d.Species = append(d.Species, *sp)
 		d.Totals.Detections += s.Count
@@ -172,8 +230,10 @@ func buildReport(ctx context.Context, c config, rc reportConfig) error {
 	}
 
 	// Per-day, per-hour counts.
-	for i := 0; i < rc.Days; i++ {
+	hourlyByDay := make([][]int, days)
+	for i := 0; i < days; i++ {
 		day := first.AddDate(0, 0, i).Format("2006-01-02")
+		hourlyByDay[i] = make([]int, 24)
 		var rows []struct {
 			Sci    string `json:"scientific_name"`
 			Count  int    `json:"count"`
@@ -181,7 +241,7 @@ func buildReport(ctx context.Context, c config, rc reportConfig) error {
 			IsNew  bool   `json:"is_new_species"`
 		}
 		if err := api("/analytics/species/daily?date="+day+"&limit=1000", &rows); err != nil {
-			return fmt.Errorf("daily %s: %w", day, err)
+			return nil, nil, fmt.Errorf("daily %s: %w", day, err)
 		}
 		dd := reportDay{Date: day}
 		for _, r := range rows {
@@ -199,6 +259,7 @@ func buildReport(ctx context.Context, c config, rc reportConfig) error {
 			for h := 0; h < 24 && h < len(r.Hourly); h++ {
 				sp.Hourly[h] += r.Hourly[h]
 				d.Hourly[h] += r.Hourly[h]
+				hourlyByDay[i][h] += r.Hourly[h]
 			}
 		}
 		d.Daily = append(d.Daily, dd)
@@ -230,66 +291,80 @@ func buildReport(ctx context.Context, c config, rc reportConfig) error {
 		}
 	}
 
-	trimLeadingQuiet(d, first)
+	skip := trimLeadingQuiet(d, first)
+	hourlyByDay = hourlyByDay[skip:]
 	finishTotals(d)
 	sort.SliceStable(d.Species, func(i, j int) bool { return d.Species[i].Count > d.Species[j].Count })
+	if err := collectCompare(ctx, api, d, first, days); err != nil {
+		log.Printf("report: no comparison with the period before (%v)", err)
+	}
 	d.Highlights = highlights(d)
 	if rc.Dawn {
-		fetchDawn(ctx, c, d, end)
+		fetchDawn(ctx, c, d, now)
 	}
 
-	// Write the site: the embedded page, then photos and data.
-	tmp := c.Out + ".tmp"
-	if err := os.RemoveAll(tmp); err != nil {
+	// The period's detections feed the quality panel, the recordings and the
+	// species views.
+	dets, err := fetchDetections(ctx, client, c.BirdNET, d.Period.Start, d.Period.End)
+	if err != nil {
+		return nil, nil, fmt.Errorf("detections: %w", err)
+	}
+	d.Quality = qualityOf(dets, d)
+	if g, err := collectGrowth(ctx, api, end, loc); err != nil {
+		log.Printf("report: no species growth (%v)", err)
+	} else {
+		d.Growth = g
+	}
+	if rc.Weather {
+		d.Weather = collectWeather(ctx, api, d, hourlyByDay)
+	}
+	if rc.Prometheus != "" {
+		if s, err := collectSoundscape(ctx, rc, d, loc, now); err != nil {
+			log.Printf("report: no soundscape (%v)", err)
+		} else {
+			d.Soundscape = s
+		}
+	}
+	return d, dets, nil
+}
+
+// writeReportSite writes the report as a site into dir: the embedded page,
+// the photos and recordings it shows, data/report.json and the PDF.
+func writeReportSite(ctx context.Context, c config, rc reportConfig, d *reportData, dets []apiDetection, dir string) error {
+	if err := os.RemoveAll(dir); err != nil {
 		return err
 	}
 	dist, err := fs.Sub(reportFS, "report/dist")
 	if err != nil {
 		return err
 	}
-	if err := os.CopyFS(tmp, dist); err != nil {
+	if err := os.CopyFS(dir, dist); err != nil {
 		return fmt.Errorf("copy page: %w", err)
 	}
-	save, err := snapSaver(tmp)
+	save, err := snapSaver(dir)
 	if err != nil {
 		return err
 	}
 	if err := fetchPhotos(ctx, c, rc, d, save); err != nil {
 		return err
 	}
-	if err := fetchRecordings(ctx, c, rc, d, save); err != nil {
+	if err := fetchRecordings(ctx, c, rc, d, dets, save); err != nil {
 		return err
 	}
-	if err := writeReportJSON(tmp, d); err != nil {
+	fetchSpeciesClips(ctx, c, rc, d, dets, save)
+	if err := writeReportJSON(dir, d); err != nil {
 		return err
 	}
 	if rc.PDF {
-		pdfName, err := printReportPDF(ctx, c, tmp)
+		pdfName, err := printReportPDF(ctx, c, dir)
 		if err != nil {
 			return fmt.Errorf("pdf: %w", err)
 		}
 		d.PDF = "/" + pdfName
-		if err := writeReportJSON(tmp, d); err != nil {
+		if err := writeReportJSON(dir, d); err != nil {
 			return err
 		}
 	}
-	// -forbid applies to the report data too.
-	red, err := newRedactor(c)
-	if err != nil {
-		return err
-	}
-	if b, err := os.ReadFile(filepath.Join(tmp, "data", "report.json")); err != nil {
-		return err
-	} else if err := red.check("data/report.json", b); err != nil {
-		return err
-	}
-	if err := os.RemoveAll(c.Out); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, c.Out); err != nil {
-		return err
-	}
-	log.Printf("report: %s, %d species, %d detections, built %s in %s", d.Period.Label, d.Totals.Species, d.Totals.Detections, c.Out, time.Since(start).Round(time.Second))
 	return nil
 }
 
@@ -348,6 +423,7 @@ func highlights(d *reportData) []string {
 	top := d.Species[0]
 	out = append(out, fmt.Sprintf("The %s led the period with %s detections, %d%% of everything heard.",
 		top.Common, commas(top.Count), int(math.Round(top.Share*100))))
+	out = append(out, compareHeadline(d)...)
 
 	var owls []reportSpecies
 	for _, sp := range d.Species {
@@ -420,7 +496,7 @@ func highlights(d *reportData) []string {
 		}
 		out = append(out, fmt.Sprintf("New to the station: %s.", joinNames(names)))
 	}
-	return out
+	return append(out, compareNotes(d)...)
 }
 
 // fetchPhotos stores a large and a small photo per species under /_snap/,
@@ -602,14 +678,14 @@ func reportServeHandler(dir string) http.Handler {
 
 // trimLeadingQuiet drops the days before the station first heard anything in
 // the period (a station younger than the period), so the report covers only
-// days it actually listened.
-func trimLeadingQuiet(d *reportData, first time.Time) {
+// days it actually listened. It returns how many days it dropped.
+func trimLeadingQuiet(d *reportData, first time.Time) int {
 	skip := 0
 	for skip < len(d.Daily)-1 && d.Daily[skip].Detections == 0 {
 		skip++
 	}
 	if skip == 0 {
-		return
+		return 0
 	}
 	d.Daily = d.Daily[skip:]
 	for i := range d.Species {
@@ -620,4 +696,5 @@ func trimLeadingQuiet(d *reportData, first time.Time) {
 	d.Period.Start = start.Format("2006-01-02")
 	d.Period.Days = len(d.Daily)
 	d.Period.Label = periodLabel(start, end)
+	return skip
 }

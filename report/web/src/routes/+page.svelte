@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import type { Report, Species } from '../lib/types';
-	import { day, hour, num, offset, pct, shortHour, stamp } from '../lib/format';
+	import { addDays, day, hour, num, offset, pct, shortHour, stamp } from '../lib/format';
 	import { CAST, colorAt } from '../lib/palette';
 	import HourClock from '../lib/components/HourClock.svelte';
 	import Heatmap from '../lib/components/Heatmap.svelte';
@@ -12,6 +12,13 @@
 	import Stream from '../lib/components/Stream.svelte';
 	import DawnPanels from '../lib/components/DawnPanels.svelte';
 	import ChartTable from '../lib/components/ChartTable.svelte';
+	import QualityPanel from '../lib/components/QualityPanel.svelte';
+	import Growth from '../lib/components/Growth.svelte';
+	import WeatherSong from '../lib/components/WeatherSong.svelte';
+	import Soundscape from '../lib/components/Soundscape.svelte';
+	import SpeciesDetail from '../lib/components/SpeciesDetail.svelte';
+	import ChangeChip from '../lib/components/ChangeChip.svelte';
+	import { player } from '../lib/player.svelte';
 
 	let report = $state<Report | null>(null);
 	let failed = $state(false);
@@ -49,9 +56,9 @@
 	const colorOf = (code: string) => colorAt(report?.species.findIndex((s) => s.code === code) ?? -1);
 
 	// Numerals follow the sections that are present.
-	const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'];
+	const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX'];
 	const nums = $derived.by(() => {
-		const keys = ['brief', report?.recordings && 'listen', 'rhythm', hasPatterns && 'patterns', 'regulars', 'notable', 'days', 'list'];
+		const keys = ['brief', report?.recordings && 'listen', 'rhythm', hasPatterns && 'patterns', 'regulars', 'notable', 'days', 'list', report?.quality && 'quality'];
 		return Object.fromEntries(keys.filter(Boolean).map((k, i) => [k, ROMAN[i]])) as Record<string, string>;
 	});
 
@@ -69,6 +76,24 @@
 	const dawnRows = $derived(
 		(report?.dawn?.series ?? []).map((s) => ({ name: s.common, cells: s.days.map((d) => (d.minutes === null ? '–' : offset(d.minutes))) }))
 	);
+	const growthRows = $derived(
+		(report?.growth?.days ?? [])
+			.filter((d) => d.new > 0)
+			.map((d) => ({ name: day(d.date, { weekday: 'short', month: 'short', day: 'numeric' }), cells: [String(d.new), String(d.total), d.species?.join(', ') ?? ''] }))
+	);
+	const weatherRows = $derived.by(() => {
+		const w = report?.weather;
+		if (!w) return [];
+		return Array.from({ length: w.hours.length / 24 }, (_, k) => {
+			const hs = w.hours.slice(k * 24, (k + 1) * 24);
+			const ts = hs.flatMap((h) => (h.t === undefined ? [] : [h.t]));
+			return {
+				name: day(addDays(w.start, k), { weekday: 'short', month: 'short', day: 'numeric' }),
+				cells: [num(hs.reduce((a, h) => a + h.n, 0)), ts.length ? `${Math.min(...ts).toFixed(0)} to ${Math.max(...ts).toFixed(0)} °C` : '–', String(hs.filter((h) => h.r).length)]
+			};
+		});
+	});
+	const soundRows = $derived((report?.soundscape?.bands ?? []).map((b, i) => ({ name: b, cells: report!.soundscape!.levels[i].map((v) => (v === null ? '·' : v.toFixed(1))) })));
 	const photoOf = (sci: string) => report?.species.find((s) => s.scientific === sci)?.photo;
 	const pdfName = $derived(report ? `field-notes-${report.period.end}.pdf` : 'field-notes.pdf');
 
@@ -97,6 +122,8 @@
 			if (!r.ok) throw new Error(String(r.status));
 			report = await r.json();
 			document.title = `${report!.title} · ${report!.period.label} · updated ${stamp(report!.generatedAt)}`;
+			const code = new URLSearchParams(location.search).get('species');
+			if (code && !printMode) selected = report!.species.find((s) => s.code === code) ?? null;
 		} catch {
 			failed = true;
 		}
@@ -111,6 +138,24 @@
 		);
 		document.documentElement.dataset.ready = '1';
 	});
+
+	// A species' own view, opened from a card or a link (?species=code).
+	let selected = $state<Species | null>(null);
+	function openSpecies(s: Species) {
+		selected = s;
+		const u = new URL(location.href);
+		u.searchParams.set('species', s.code);
+		history.replaceState(null, '', u);
+	}
+	function closeSpecies() {
+		selected = null;
+		const u = new URL(location.href);
+		u.searchParams.delete('species');
+		history.replaceState(null, '', u);
+	}
+
+	// "Play all": the best recordings, then the latest.
+	const queue = $derived(report?.recordings ? [...report.recordings.best, ...report.recordings.recent] : []);
 
 	const onPrint = () => window.print();
 	const lead = (s: Species) => `${num(s.count)} detections · peak at ${hour(s.peakHour)}`;
@@ -177,6 +222,14 @@
 					Recordings straight from the station: the clearest calls of the period, and the latest birds it heard.
 					Tap a spectrogram to play from that point.
 				</p>
+				<div class="playall no-print">
+					{#if player.queue.length}
+						<button class="btn small" onclick={() => player.stop()}>■ Stop</button>
+						<span>Playing {player.index + 1} of {player.queue.length}: {player.current?.common}</span>
+					{:else if queue.length > 1}
+						<button class="btn small" onclick={() => player.playAll(queue)}>▶ Play all {queue.length}</button>
+					{/if}
+				</div>
 				{#if report.recordings.best.length}
 					<h3>Best recordings</h3>
 					<div class="recs">
@@ -249,6 +302,22 @@
 							<ChartTable label="Show as a table" corner="After civil dawn" head={dawnHead} rows={dawnRows} />
 						</div>
 					{/if}
+					{#if report.weather}
+						<div class="chart">
+							<h3>Weather and song</h3>
+							<p class="dek small">Detections an hour above the temperature, with the hours it rained shaded. {report.weather.insight}</p>
+							<WeatherSong w={report.weather} />
+							<ChartTable label="Show as a table" corner="Day" head={['Detections', 'Temperature', 'Rain hours']} rows={weatherRows} />
+						</div>
+					{/if}
+					{#if report.soundscape}
+						<div class="chart">
+							<h3>The soundscape</h3>
+							<p class="dek small">How loud the station was, hour by hour and pitch by pitch, with the birds heard above it. Low bands are traffic, wind and hum; the middle and high bands are where birds sing. {report.soundscape.insight}</p>
+							<Soundscape s={report.soundscape} hourly={report.hourly} />
+							<ChartTable label="Show as a table" corner="Level, dB" head={hourHead} rows={soundRows} />
+						</div>
+					{/if}
 				</div>
 			</section>
 		{/if}
@@ -258,7 +327,7 @@
 			<p class="dek">The {regulars.length} most-heard species, with the hours they called.</p>
 			<div class="cards">
 				{#each regulars as s, i (s.code)}
-					<SpeciesCard {s} rank={i + 1} eager={printMode || i < 3} />
+					<SpeciesCard {s} rank={i + 1} eager={printMode || i < 3} onopen={openSpecies} compare={report.compare} />
 				{/each}
 			</div>
 		</section>
@@ -322,6 +391,32 @@
 						</ul>
 					</div>
 				{/if}
+					{#if report.compare?.quiet?.length}
+						<div class="note">
+							<h3>Gone quiet</h3>
+							<p class="dek small">Regulars heard far less than {report.compare.label}, per listening day.</p>
+							<ul class="mini">
+								{#each report.compare.quiet as q (q.code)}
+									{@const sp = report.species.find((x) => x.code === q.code)}
+									<li>
+										{#if sp?.photo}<img src={sp.photo.small} alt="" loading={printMode ? 'eager' : 'lazy'} />{/if}
+										<div><strong>{q.common}</strong><span>{num(q.prev)} before, {num(q.now)} now · down {Math.round(-q.change * 100)}%</span></div>
+									</li>
+								{/each}
+							</ul>
+						</div>
+					{/if}
+					{#if report.compare?.notHeard?.length}
+						<div class="note">
+							<h3>Not heard this time</h3>
+							<p class="dek small">Heard {report.compare.label}, silent now.</p>
+							<ul class="mini">
+								{#each report.compare.notHeard as m (m.code)}
+									<li><div><strong>{m.common}</strong><span>{num(m.count)} detections before</span></div></li>
+								{/each}
+							</ul>
+						</div>
+					{/if}
 			</div>
 		</section>
 
@@ -332,6 +427,14 @@
 				{day(report.totals.busiestDay, { weekday: 'long', month: 'long', day: 'numeric' })}.
 			</p>
 			<DailyBars days={report.daily} />
+			{#if report.growth}
+				<div class="chart growth">
+					<h3>Species so far</h3>
+					<p class="dek small">How many different species the station has heard in all, by day. Each step up is a species heard for the first time; it stands at {report.growth.total}.</p>
+					<Growth g={report.growth} />
+					<ChartTable label="Show as a table" corner="Day" head={['New', 'Total', 'First heard']} rows={growthRows} />
+				</div>
+			{/if}
 		</section>
 
 		<section class="list">
@@ -346,6 +449,7 @@
 						<th>Peak</th>
 						<th>First heard</th>
 						<th>Likelihood</th>
+							{#if report.compare}<th>vs {report.compare.label}</th>{/if}
 					</tr>
 				</thead>
 				<tbody>
@@ -355,7 +459,7 @@
 								{#if s.photo}<img src={s.photo.small} alt="" loading={printMode ? 'eager' : 'lazy'} />{/if}
 							</td>
 							<td>
-								<strong>{s.common}</strong>{#if s.isNew}<span class="dot" title="new"></span>{/if}
+								<button class="link" onclick={() => openSpecies(s)}><strong>{s.common}</strong></button>{#if s.isNew}<span class="dot" title="new"></span>{/if}
 								<em>{s.scientific}</em>
 							</td>
 							<td class="r">{num(s.count)}</td>
@@ -363,11 +467,23 @@
 							<td>{hour(s.peakHour)}</td>
 							<td>{stamp(s.firstHeard)}</td>
 							<td class="cap">{s.rarity ?? ''}</td>
+								{#if report.compare}<td><ChangeChip change={s.change} prev={s.prev ?? 0} label={report.compare.label} /></td>{/if}
 						</tr>
 					{/each}
 				</tbody>
 			</table>
 		</section>
+
+		{#if report.quality}
+			<section class="quality">
+				<h2><span class="num">{nums.quality}</span> How sure we are</h2>
+				<p class="dek">
+					BirdNET-Go's models sometimes mistake noise for birds. Two models hearing the same sound and agreeing is the best
+					evidence there is, and every detection a person marks as a false positive is left out of this report.
+				</p>
+				<QualityPanel q={report.quality} />
+			</section>
+		{/if}
 
 		<footer class="colophon">
 			<h2>Colophon</h2>
@@ -390,6 +506,8 @@
 			{/if}
 		</footer>
 	</main>
+
+	<SpeciesDetail s={selected} {report} onclose={closeSpecies} />
 {/if}
 
 <style>
@@ -838,7 +956,9 @@
 		th:nth-child(6),
 		td:nth-child(6),
 		th:nth-child(7),
-		td:nth-child(7) {
+		td:nth-child(7),
+		th:nth-child(8),
+		td:nth-child(8) {
 			display: none;
 		}
 		.hero-caption {
@@ -884,6 +1004,44 @@
 		/* Listen fills the rest of page 2; the clock and heatmap start page 3. */
 		.listen + .rhythm {
 			break-before: page;
+		}
+	}
+	.btn.small {
+		padding: 0.45rem 0.9rem;
+		font-size: 0.74rem;
+		box-shadow: none;
+	}
+	.playall {
+		display: flex;
+		align-items: center;
+		gap: 0.8rem;
+		margin: -0.6rem 0 1.4rem;
+		font: 500 0.82rem var(--sans);
+		color: var(--muted);
+		min-height: 2.1rem;
+	}
+	.growth {
+		margin-top: 1.6rem;
+	}
+	.quality h2 {
+		margin-bottom: 0.6rem;
+	}
+	.link {
+		border: 0;
+		background: none;
+		padding: 0;
+		font: inherit;
+		color: inherit;
+		cursor: pointer;
+		text-align: left;
+	}
+	.link:hover strong {
+		text-decoration: underline;
+		text-underline-offset: 3px;
+	}
+	@media print {
+		.quality {
+			break-inside: avoid;
 		}
 	}
 </style>

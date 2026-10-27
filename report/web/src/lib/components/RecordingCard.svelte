@@ -1,44 +1,25 @@
-<script lang="ts" module>
-	// One clip plays at a time across every card on the page.
-	let playing: HTMLAudioElement | null = null;
-</script>
-
 <script lang="ts">
 	import type { Recording, Photo } from '../types';
 	import { pct, stamp } from '../format';
+	import { player } from '../player.svelte';
 	let {
 		r,
 		photo,
 		eager = false
 	}: { r: Recording; photo?: Photo; eager?: boolean } = $props();
 
-	let audio = $state<HTMLAudioElement>();
-	let paused = $state(true);
-	let progress = $state(0);
-	let failed = $state(false);
-
-	function toggle() {
-		if (!audio) return;
-		if (audio.paused) {
-			if (playing && playing !== audio) playing.pause();
-			playing = audio;
-			audio.play().catch(() => (failed = true));
-		} else {
-			audio.pause();
-		}
-	}
+	// Every card shares one player: one clip at a time, and "Play all" can chain them.
+	const active = $derived(player.src === r.audio);
+	const playing = $derived(active && player.playing);
+	const progress = $derived(active ? player.progress : 0);
+	const failed = $derived(active && player.failed);
 	function seek(e: MouseEvent) {
-		if (!audio || !audio.duration) return;
 		const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
-		audio.currentTime = ((e.clientX - box.left) / box.width) * audio.duration;
-		if (audio.paused) toggle();
+		player.seek(r.audio, Math.min(1, Math.max(0, (e.clientX - box.left) / box.width)));
 	}
-	const onTime = () => {
-		if (audio?.duration) progress = audio.currentTime / audio.duration;
-	};
 </script>
 
-<article class="rec" class:on={!paused}>
+<article class="rec" class:on={playing}>
 	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 	<div class="spec" onclick={seek} title="Play from here">
 		{#if r.spectrogram}
@@ -49,8 +30,8 @@
 		<span class="head" style="left: {progress * 100}%" class:show={progress > 0}></span>
 	</div>
 	<div class="row">
-		<button class="play no-print" onclick={toggle} aria-label={paused ? `Play the ${r.common} recording` : 'Pause'}>
-			{#if paused}
+		<button class="play no-print" onclick={() => player.toggle(r.audio)} aria-label={playing ? 'Pause' : `Play the ${r.common} recording`}>
+			{#if !playing}
 				<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" /></svg>
 			{:else}
 				<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" /></svg>
@@ -63,18 +44,6 @@
 		</div>
 	</div>
 	{#if failed}<p class="err no-print">This browser can't play the clip.</p>{/if}
-	<audio
-		bind:this={audio}
-		src={r.audio}
-		preload="none"
-		onplay={() => (paused = false)}
-		onpause={() => (paused = true)}
-		onended={() => {
-			paused = true;
-			progress = 0;
-		}}
-		ontimeupdate={onTime}
-	></audio>
 </article>
 
 <style>

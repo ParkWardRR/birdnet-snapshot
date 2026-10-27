@@ -38,3 +38,9 @@ export function offset(min: number): string {
 	if (min === 0) return 'at dawn';
 	return `${min > 0 ? '+' : '−'}${Math.abs(min)} min`;
 }
+
+/** The date n days after a YYYY-MM-DD date. */
+export function addDays(date: string, n: number): string {
+	const [y, m, d] = date.split('-').map(Number);
+	return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+}

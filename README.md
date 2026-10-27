@@ -120,7 +120,16 @@ A second, different way to share the station. Instead of copying the app, `birdn
 <td colspan="2"><img src="docs/images/fieldnotes-handoff.jpg" alt="Field Notes daily handoff: a ridgeline of who sings when, a streamgraph of acoustic succession, and dawn chorus onset panels"/></td>
 </tr>
 <tr>
-<td colspan="2" align="center"><sub>The web page, the PDF it prints to, the Listen section, and the daily handoff charts</sub></td>
+<td colspan="2"><img src="docs/images/fieldnotes-weather.jpg" alt="Weather and song, and the soundscape heatmap"/></td>
+</tr>
+<tr>
+<td colspan="2"><img src="docs/images/fieldnotes-quality.jpg" alt="The species curve and the quality panel"/></td>
+</tr>
+<tr>
+<td colspan="2"><img src="docs/images/fieldnotes-species.jpg" width="60%" alt="A species' own view: hours, days and recordings"/></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><sub>The web page, the PDF it prints to, Listen, the daily handoff, weather and soundscape, quality, and a species' own view</sub></td>
 </tr>
 </table>
 
@@ -136,9 +145,13 @@ set -a; . ./notes.env; set +a; birdnet-snapshot report -out field-notes -deploy 
 - **Recordings:** the 3 best clips of the period (models agreeing first, then confidence) and the 3 latest, one per species in each list, each a spectrogram you can tap to play from that point. Clips follow the snapshot's rules: none from `-skip-audio` sources, none with `-no-audio`, none marked false positive in BirdNET-Go, none below `-clip-min` confidence (0.5). `-clips 0` leaves the section out. The PDF shows the spectrograms.
 - **The PDF** is the same page printed by headless Chrome with a print stylesheet (US Letter, covers and sections on their own pages, nine species cards per page). `-pdf=false` skips it.
 - **Daily patterns:** three charts drawn in the page itself (no chart library, so the report stays small). *Who sings when* is a ridgeline, one ridge per species as a share of its own detections, rows from earliest singer to latest. *Acoustic succession* is a streamgraph of detections per hour for the five most-heard species. *Dawn chorus onset* is one small panel per morning singer: minutes after civil dawn it started, day by day, on a shared scale. Hover (or arrow-key through the hours) for exact values; each chart has a collapsed table twin. Species keep one colour across all three, from a palette checked for colour-blind separation. Night species and days the station was not yet listening at dawn are left out of the onset panels, and it needs two usable days before it appears.
+- **Weather and soundscape:** *Weather and song* puts detections an hour above the temperature for the whole period, with rainy hours shaded, from the hourly weather BirdNET-Go stores (`-weather`, on by default). *The soundscape* is a heatmap of sound level by hour of day and octave band, shaded within each pitch so the rhythm of every band shows, with the birds heard each hour above it. It reads BirdNET-Go's sound-level metrics from Prometheus (`-prometheus URL`, with `-prometheus-user` and `REPORT_PROMETHEUS_PASSWORD`; `-sound-metric` names the octave-band metric), so it only appears when you have that.
+- **Week over week:** when the period before has 3+ listening days, species cards and the table show how each species changed per listening day, the brief says whether activity is up or down, and "Worth noting" lists the regulars that went quiet and the species not heard this time. A station younger than two periods simply has no comparison yet.
+- **Species so far, and how sure we are:** a step curve of every species the station has heard, and a quality panel: the share of detections two or more models agreed on, the median confidence, a confidence histogram, how many detections a person reviewed and removed, and the species to treat with caution (no microphone names).
+- **Species view:** click a card or a name in the table (or open `?species=code`) for that species' hours, days, comparison and its best recordings (`-species-clips`, 2 for each of the 12 most-heard). **Play all** plays the Listen section's recordings in turn.
 - **Last updated:** the cover says when the report was built ("Updated Oct 27, 7:29 am · 1 min ago", the "ago" ticking while the tab is open, amber after 3 hours) and so does the tab title. The PDF keeps the time and drops the "ago". The page has a songbird favicon (SVG, ICO and Apple touch icon); `report/web/static/favicon.svg` is the source and `report/web/scripts/make-icons.sh` rebuilds the raster sizes with Chrome and ImageMagick.
 - **On a schedule:** [`deploy/systemd/birdnet-report.{service,timer}`](deploy/systemd/) rebuild and publish the report every hour from `~/.config/birdnet-report/env` (start from [`deploy/report.env.example`](deploy/report.env.example), with its own storage zone). Only changed files are uploaded (a few MB when the latest recordings change). It sits beside the snapshot timer; its Chrome uses port 9223. Setup is under [systemd timer with the binary](#running-it-on-a-schedule).
-- **Privacy:** aggregate counts per species and hour plus the six clips above. The dawn-onset panels are the one part that depends on the station location: BirdNET-Go works out civil dawn from its coordinates, and only each species' offset in minutes is copied, never the dawn time or the coordinates. Offsets next to the hourly charts could still hint roughly at the region, so `-dawn=false` leaves them out. No coordinates (they are never copied from BirdNET-Go), no source names, `-forbid` checked against the report data; night is a fixed 7 pm–6 am window because real sunrise times would reveal latitude. A station younger than the period gets a report covering only the days it listened.
+- **Privacy:** aggregate counts per species and hour plus the six clips above. The weather chart adds the hourly temperature, wind and rain BirdNET-Go stores for your location (generic, but it narrows the climate; `-weather=false` leaves it out), and the species view publishes up to two clips for each of the twelve most-heard species under the same rules as Listen. The dawn-onset panels are the one part that depends on the station location: BirdNET-Go works out civil dawn from its coordinates, and only each species' offset in minutes is copied, never the dawn time or the coordinates. Offsets next to the hourly charts could still hint roughly at the region, so `-dawn=false` leaves them out. No coordinates (they are never copied from BirdNET-Go), no source names, `-forbid` checked against the report data; night is a fixed 7 pm–6 am window because real sunrise times would reveal latitude. A station younger than the period gets a report covering only the days it listened.
 
 ## Watching the station: audit and rare visitors
 
@@ -319,6 +332,8 @@ Every flag has an environment variable, handy for containers and systemd `Enviro
 | `-title`, `-subtitle`, `-station` | `REPORT_TITLE`, `REPORT_SUBTITLE`, `REPORT_STATION` | Field Notes, … | `report`: cover text (keep the station vague) |
 | `-pdf`, `-photos`, `-deploy` | `REPORT_PDF`, `REPORT_PHOTOS`, `REPORT_DEPLOY` | `true`, `true`, `false` | `report`: print a PDF, fetch Avicommons photos, publish when built |
 | `-clips`, `-clip-min` | `REPORT_CLIPS`, `REPORT_CLIP_MIN` | `3`, `0.5` | `report`: best and latest recordings to publish (each list), lowest confidence allowed |
+| `-weather`, `-species-clips` | `REPORT_WEATHER`, `REPORT_SPECIES_CLIPS` | `true`, `2` | `report`: weather chart; recordings per species for the species view |
+| `-prometheus`, `-prometheus-user`, `-sound-metric` | `REPORT_PROMETHEUS`, `REPORT_PROMETHEUS_USER` (password: `REPORT_PROMETHEUS_PASSWORD`), `REPORT_SOUND_METRIC` | | `report`: Prometheus holding BirdNET-Go's sound-level metrics, for the soundscape |
 | `-dawn` | `REPORT_DAWN` | `true` | `report`: chart dawn-chorus onset (minutes from civil dawn; see Privacy) |
 | `-budget`, `-page-wait`, `-concurrency`, `-addr` | `SNAPSHOT_BUDGET`, … | `20m`, `20s`, `8`, `127.0.0.1:8765` | tuning |
 

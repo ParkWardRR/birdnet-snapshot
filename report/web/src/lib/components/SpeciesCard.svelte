@@ -2,10 +2,18 @@
 	import type { Species } from '../types';
 	import { hour, num, pct } from '../format';
 	import Sparkline from './Sparkline.svelte';
-	let { s, rank, eager = false }: { s: Species; rank: number; eager?: boolean } = $props();
+	import ChangeChip from './ChangeChip.svelte';
+	let {
+		s,
+		rank,
+		eager = false,
+		onopen,
+		compare
+	}: { s: Species; rank: number; eager?: boolean; onopen?: (s: Species) => void; compare?: { label: string } } = $props();
 </script>
 
-<article class="card">
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+<article class="card" class:open={!!onopen} onclick={() => onopen?.(s)}>
 	<figure>
 		{#if s.photo}
 			<img src={s.photo.large} alt={s.common} loading={eager ? 'eager' : 'lazy'} decoding="async" />
@@ -25,18 +33,25 @@
 			{#if s.rarity}<span class="badge" class:rare={s.rarity !== 'very common' && s.rarity !== 'common'}>{s.rarity}</span>{/if}
 			{#if s.family}<span class="badge plain">{s.family}</span>{/if}
 		</div>
-		<p class="count"><strong>{num(s.count)}</strong> detections <span>· {pct(s.share)} of all</span></p>
+		<p class="count">
+			<strong>{num(s.count)}</strong> detections <span>· {pct(s.share)} of all</span>
+			{#if compare}<ChangeChip change={s.change} prev={s.prev ?? 0} label={compare.label} />{/if}
+		</p>
 		<Sparkline values={s.hourly} />
 		<dl>
 			<div><dt>Peak</dt><dd>{hour(s.peakHour)}</dd></div>
 			<div><dt>Days heard</dt><dd>{s.daysHeard}</dd></div>
 			<div><dt>Confidence</dt><dd>{pct(s.avgConfidence)}</dd></div>
 		</dl>
+		{#if onopen}
+			<button class="more no-print" onclick={(e) => { e.stopPropagation(); onopen(s); }}>Hours, days and recordings</button>
+		{/if}
 	</div>
 </article>
 
 <style>
 	.card {
+		position: relative;
 		background: var(--card);
 		border: 1px solid var(--rule);
 		border-radius: 18px;
@@ -65,6 +80,24 @@
 		font: 500 0.62rem var(--sans);
 		color: rgba(255, 255, 255, 0.88);
 		text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+	}
+	.card.open {
+		cursor: pointer;
+		transition: transform 0.15s, box-shadow 0.15s;
+	}
+	.card.open:hover {
+		transform: translateY(-2px);
+	}
+	.more {
+		align-self: start;
+		border: 0;
+		background: none;
+		padding: 0;
+		font: 600 0.74rem var(--sans);
+		color: var(--forest);
+		cursor: pointer;
+		text-decoration: underline;
+		text-underline-offset: 3px;
 	}
 	.nophoto {
 		height: 100%;

@@ -158,6 +158,11 @@ func parseFlags(cmd string, args []string) (config, string, reportConfig) {
 	fs.IntVar(&rc.Clips, "clips", envInt("REPORT_CLIPS", 3), "report: publish this many best and this many most recent recordings, one per species (0 = none; -skip-audio and -no-audio apply) [REPORT_CLIPS]")
 	fs.Float64Var(&rc.ClipMin, "clip-min", envFloat("REPORT_CLIP_MIN", 0.5), "report: lowest `confidence` a published recording may have [REPORT_CLIP_MIN]")
 	fs.BoolVar(&rc.Dawn, "dawn", envBool("REPORT_DAWN", true), "report: chart the dawn-chorus onset of the morning singers (minutes from civil dawn; BirdNET-Go works dawn out from the station location, only the offset is published) [REPORT_DAWN]")
+	fs.BoolVar(&rc.Weather, "weather", envBool("REPORT_WEATHER", true), "report: chart activity against the hourly weather BirdNET-Go stores [REPORT_WEATHER]")
+	fs.IntVar(&rc.SpeciesClips, "species-clips", envInt("REPORT_SPECIES_CLIPS", 2), "report: recordings for each of the 12 most-heard species, for the species view (0 = none) [REPORT_SPECIES_CLIPS]")
+	fs.StringVar(&rc.Prometheus, "prometheus", env("REPORT_PROMETHEUS", ""), "report: Prometheus `url` holding BirdNET-Go's sound-level metrics, for the soundscape [REPORT_PROMETHEUS]")
+	fs.StringVar(&rc.PrometheusUser, "prometheus-user", env("REPORT_PROMETHEUS_USER", ""), "report: basic-auth `user` for Prometheus (the password is REPORT_PROMETHEUS_PASSWORD) [REPORT_PROMETHEUS_USER]")
+	fs.StringVar(&rc.SoundMetric, "sound-metric", env("REPORT_SOUND_METRIC", "myaudio_octave_band_level_db"), "report: octave-band level `metric` in Prometheus [REPORT_SOUND_METRIC]")
 	fs.BoolVar(&rc.Deploy, "deploy", envBool("REPORT_DEPLOY", false), "report: deploy -out to the Bunny storage zone when built [REPORT_DEPLOY]")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: birdnet-snapshot %s [flags]\n\n", cmd)
@@ -165,6 +170,7 @@ func parseFlags(cmd string, args []string) (config, string, reportConfig) {
 	}
 	_ = fs.Parse(args)
 	c.ZoneKey = os.Getenv("BUNNY_STORAGE_KEY")
+	rc.PrometheusPass = os.Getenv("REPORT_PROMETHEUS_PASSWORD")
 	c.SkipAudio = splitList(strings.ToLower(*skip))
 	c.Routes = splitList(*routes)
 	c.Redact = splitList(*redact)

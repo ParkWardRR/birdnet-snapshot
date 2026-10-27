@@ -45,6 +45,7 @@ One Go binary (or a container with Chrome bundled) that turns a live BirdNET-Go 
 
 | Version | Highlights |
 |---|---|
+| v0.7.0 | Field Notes: week over week, quality, species growth, weather, soundscape, species view, Play all |
 | v0.6.0 | `audit` and `rare` commands with ntfy |
 | v0.5.0 | Field Notes "Updated" chip and title, favicon |
 | v0.4.0 | Field Notes daily handoff: ridgeline, streamgraph and dawn-onset panels |
