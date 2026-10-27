@@ -147,6 +147,7 @@ func parseFlags(cmd string, args []string) (config, string, reportConfig) {
 	fs.BoolVar(&rc.Photos, "photos", envBool("REPORT_PHOTOS", true), "report: fetch large species photos from Avicommons (else BirdNET-Go's small ones) [REPORT_PHOTOS]")
 	fs.IntVar(&rc.Clips, "clips", envInt("REPORT_CLIPS", 3), "report: publish this many best and this many most recent recordings, one per species (0 = none; -skip-audio and -no-audio apply) [REPORT_CLIPS]")
 	fs.Float64Var(&rc.ClipMin, "clip-min", envFloat("REPORT_CLIP_MIN", 0.5), "report: lowest `confidence` a published recording may have [REPORT_CLIP_MIN]")
+	fs.BoolVar(&rc.Dawn, "dawn", envBool("REPORT_DAWN", true), "report: chart the dawn-chorus onset of the morning singers (minutes from civil dawn; BirdNET-Go works dawn out from the station location, only the offset is published) [REPORT_DAWN]")
 	fs.BoolVar(&rc.Deploy, "deploy", envBool("REPORT_DEPLOY", false), "report: deploy -out to the Bunny storage zone when built [REPORT_DEPLOY]")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: birdnet-snapshot %s [flags]\n\n", cmd)

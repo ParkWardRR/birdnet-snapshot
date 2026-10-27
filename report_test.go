@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -15,7 +16,8 @@ import (
 )
 
 // fakeAnalytics serves the BirdNET-Go endpoints the report reads.
-func fakeAnalytics(t *testing.T, today string) *httptest.Server {
+// earlier are further days the station was listening (it is one day old without them).
+func fakeAnalytics(t *testing.T, today string, earlier ...string) *httptest.Server {
 	t.Helper()
 	hourly := func(peak, n int) []int {
 		h := make([]int, 24)
@@ -35,7 +37,7 @@ func fakeAnalytics(t *testing.T, today string) *httptest.Server {
 					"first_heard": today + "T07:30:00-07:00", "last_heard": today + "T07:30:00-07:00", "avg_confidence": 0.5, "max_confidence": 0.5},
 			})
 		case "/api/v2/analytics/species/daily":
-			if q.Get("date") != today { // the station is one day old
+			if d := q.Get("date"); d != today && !slices.Contains(earlier, d) {
 				writeJSON(w, []any{})
 				return
 			}
@@ -58,6 +60,25 @@ func fakeAnalytics(t *testing.T, today string) *httptest.Server {
 			_, _ = w.Write(append([]byte("jpeg-"), q.Get("name")...))
 		case "/api/v2/media/species-image/info":
 			writeJSON(w, map[string]any{"authorName": "A. Photographer", "licenseName": "CC0", "sourceProvider": "avicommons"})
+		case "/api/v2/analytics/time/dawn-onset":
+			// Only the daytime singer is asked about: the owl (night caller) and the
+			// one-off sparrow must never be requested.
+			if q.Get("species") != "House Finch" {
+				http.Error(w, "unexpected species "+q.Get("species"), http.StatusInternalServerError)
+				return
+			}
+			var out []map[string]any
+			for d, _ := time.Parse("2006-01-02", q.Get("start_date")); !d.After(mustDate(q.Get("end_date"))); d = d.AddDate(0, 0, 1) {
+				min := 25
+				switch d.Format("2006-01-02") {
+				case today:
+					min = 30
+				case earlier[len(earlier)-1]:
+					min = 20
+				}
+				out = append(out, map[string]any{"date": d.Format("2006-01-02"), "onsetRelMinutes": float64(min) + 0.4, "detectionCount": 40})
+			}
+			writeJSON(w, out)
 		case "/api/v2/detections/recent":
 			writeJSON(w, []map[string]any{{"timestamp": today + "T07:30:00-07:00"}})
 		case "/api/v2/detections":
@@ -308,5 +329,133 @@ func TestReportHelpers(t *testing.T) {
 		if isNight(h) != (h >= 19 || h < 6) {
 			t.Errorf("isNight(%d)", h)
 		}
+	}
+}
+
+func mustDate(s string) time.Time {
+	d, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		panic(err)
+	}
+	return d
+}
+
+func TestOnsetDays(t *testing.T) {
+	la, _ := time.LoadLocation("America/Los_Angeles")
+	at := func(s string) time.Time {
+		tt, err := time.ParseInLocation("2006-01-02 15:04", s, la)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tt
+	}
+	f := func(v float64) *float64 { return &v }
+	days := []reportDay{{Date: "2026-10-23"}, {Date: "2026-10-24"}, {Date: "2026-10-25"}, {Date: "2026-10-26"}}
+	raw := []onsetPoint{{"2026-10-23", f(101), 84}, {"2026-10-24", f(30.4), 204}, {"2026-10-25", nil, 3}, {"2026-10-26", f(-19.6), 77}}
+	show := func(ds []reportOnsetDay) string {
+		var s []string
+		for _, d := range ds {
+			if d.Minutes == nil {
+				s = append(s, "-")
+			} else {
+				s = append(s, fmt.Sprint(*d.Minutes))
+			}
+		}
+		return strings.Join(s, " ")
+	}
+	for _, tc := range []struct {
+		name         string
+		start, now   string
+		want         string
+		wantCountSum int
+	}{
+		// The station's first bird was heard at 10:54, after dawn: the 23rd's
+		// onset is when listening began. The server's own null stays null.
+		{"started after dawn", "2026-10-23 10:54", "2026-10-26 14:00", "- 30 - -20", 368},
+		{"started before dawn", "2026-10-23 05:10", "2026-10-26 14:00", "101 30 - -20", 368},
+		// 7:30 am on the 26th: that morning's chorus isn't over.
+		{"today unfinished", "2026-10-23 05:10", "2026-10-26 07:30", "101 30 - -", 368},
+		{"no station start known", "0001-01-01 00:00", "2026-10-26 14:00", "101 30 - -20", 368},
+	} {
+		start := at(tc.start)
+		if tc.start[:4] == "0001" {
+			start = time.Time{}
+		}
+		ds := onsetDays(days, raw, start, at(tc.now))
+		if got := show(ds); got != tc.want {
+			t.Errorf("%s: onsets %q, want %q", tc.name, got, tc.want)
+		}
+		sum := 0
+		for _, d := range ds {
+			sum += d.Count
+		}
+		if sum != tc.wantCountSum {
+			t.Errorf("%s: counts %d, want %d", tc.name, sum, tc.wantCountSum)
+		}
+	}
+	// A day the server left out stays in the series, empty.
+	if ds := onsetDays(days, raw[:2], at("2026-10-23 05:10"), at("2026-10-26 14:00")); len(ds) != 4 || ds[3].Minutes != nil {
+		t.Errorf("missing day: %+v", ds)
+	}
+	if got := earliestHeard([]reportSpecies{{FirstHeard: "2026-10-24T07:00:00-07:00"}, {FirstHeard: "2026-10-23T10:54:00-07:00"}, {FirstHeard: "junk"}}, la); got.Format("2006-01-02 15:04") != "2026-10-23 10:54" {
+		t.Errorf("earliestHeard = %v", got)
+	}
+}
+
+func TestBuildReportDawn(t *testing.T) {
+	t.Setenv("TZ", "America/Los_Angeles")
+	loc, _ := time.LoadLocation("America/Los_Angeles")
+	now := time.Now().In(loc)
+	today, d1, d2 := now.Format("2006-01-02"), now.AddDate(0, 0, -1).Format("2006-01-02"), now.AddDate(0, 0, -2).Format("2006-01-02")
+	srv := fakeAnalytics(t, today, d1, d2)
+	defer srv.Close()
+
+	out := filepath.Join(t.TempDir(), "report")
+	if err := buildReport(context.Background(), config{BirdNET: srv.URL, Out: out}, reportConfig{Days: 7, Dawn: true}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(out, "data", "report.json"))
+	var d reportData
+	if err := json.Unmarshal(raw, &d); err != nil {
+		t.Fatal(err)
+	}
+	if d.Dawn == nil || len(d.Dawn.Series) != 1 || d.Dawn.Series[0].Common != "House Finch" || d.Dawn.Series[0].Code != "houfin" {
+		t.Fatalf("dawn %+v", d.Dawn)
+	}
+	days := d.Dawn.Series[0].Days
+	if len(days) != 3 || days[0].Date != d2 || days[1].Date != d1 || days[2].Date != today {
+		t.Fatalf("days %+v", days)
+	}
+	if days[0].Minutes == nil || *days[0].Minutes != 20 || days[1].Minutes == nil || *days[1].Minutes != 25 {
+		t.Errorf("onsets %+v %+v", days[0].Minutes, days[1].Minutes)
+	}
+	if settled := now.Hour() >= dawnSettledHour; settled != (days[2].Minutes != nil) {
+		t.Errorf("today's onset at %d:00: %v", now.Hour(), days[2].Minutes)
+	}
+	// Only offsets: no dawn time, and nothing that looks like a coordinate.
+	for _, bad := range []string{"civil", "sunrise", "latitude", "longitude", "34.03"} {
+		if strings.Contains(string(raw), bad) {
+			t.Errorf("report.json contains %q", bad)
+		}
+	}
+
+	// -dawn=false, and a BirdNET-Go without the endpoint, leave the chart out.
+	if err := buildReport(context.Background(), config{BirdNET: srv.URL, Out: out}, reportConfig{Days: 7}); err != nil {
+		t.Fatal(err)
+	}
+	var d2r reportData
+	readJSON(t, filepath.Join(out, "data", "report.json"), &d2r)
+	if d2r.Dawn != nil {
+		t.Error("dawn charted with -dawn off")
+	}
+	// One-day station: nothing to compare.
+	one := fakeAnalytics(t, today)
+	defer one.Close()
+	if err := buildReport(context.Background(), config{BirdNET: one.URL, Out: out}, reportConfig{Days: 7, Dawn: true}); err != nil {
+		t.Fatal(err)
+	}
+	readJSON(t, filepath.Join(out, "data", "report.json"), &d2r)
+	if d2r.Dawn != nil {
+		t.Errorf("dawn charted from one day: %+v", d2r.Dawn)
 	}
 }

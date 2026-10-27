@@ -65,4 +65,12 @@ export interface Report {
 	species: Species[];
 	highlights: string[];
 	recordings?: { best: Recording[]; recent: Recording[] };
+	dawn?: { series: OnsetSeries[] };
+}
+
+/** One morning singer's dawn-chorus onset, a point per day of the period. */
+export interface OnsetSeries {
+	code: string;
+	common: string;
+	days: { date: string; count: number; minutes: number | null }[];
 }

@@ -2,6 +2,17 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [0.4.0] - 2026-10-26
+
+### Added
+
+- Field Notes **daily handoff**, three charts drawn in the page with no chart library: *Who sings when* (a ridgeline of each species' detections as a share of its own, earliest singer first), *Acoustic succession* (a streamgraph of detections per hour for the five most-heard species) and *Dawn chorus onset* (small panels of minutes after civil dawn, per morning singer and day). Hover or arrow keys give exact values; each chart has a table twin; the PDF prints them. Species keep one colour across the charts, from a palette validated for colour-blind separation.
+- `-dawn` (default on) for the onset panels. They need BirdNET-Go's `dawn-onset` endpoint (older versions just get no panels) and two usable days. Only minutes from civil dawn are copied, never the dawn time or coordinates.
+
+### Changed
+
+- Section numerals follow the sections that are present; the heatmap is titled "Hour by hour".
+
 ## [0.3.0] - 2026-10-25
 
 ### Added

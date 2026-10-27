@@ -40,6 +40,7 @@ type reportData struct {
 	Species     []reportSpecies   `json:"species"`
 	Highlights  []string          `json:"highlights"`
 	Recordings  *reportRecordings `json:"recordings,omitempty"`
+	Dawn        *reportDawn       `json:"dawn,omitempty"`
 }
 
 type reportPeriod struct {
@@ -109,6 +110,7 @@ type reportConfig struct {
 	Photos   bool    // fetch large photos from Avicommons
 	Clips    int     // best and most recent recordings to publish (each)
 	ClipMin  float64 // lowest confidence a published recording may have
+	Dawn     bool    // chart the dawn-chorus onset of the morning singers
 }
 
 // buildReport gathers a period of data from BirdNET-Go and writes the report
@@ -232,6 +234,9 @@ func buildReport(ctx context.Context, c config, rc reportConfig) error {
 	finishTotals(d)
 	sort.SliceStable(d.Species, func(i, j int) bool { return d.Species[i].Count > d.Species[j].Count })
 	d.Highlights = highlights(d)
+	if rc.Dawn {
+		fetchDawn(ctx, c, d, end)
+	}
 
 	// Write the site: the embedded page, then photos and data.
 	tmp := c.Out + ".tmp"

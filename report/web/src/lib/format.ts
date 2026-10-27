@@ -29,3 +29,12 @@ export function stamp(iso: string): string {
 }
 
 export const isNight = (h: number) => h >= 19 || h < 6;
+
+/** "7 am – 8 am", "11 pm – midnight": the hour that starts at h. */
+export const hourSpan = (h: number) => `${hour(h)} – ${hour((h + 1) % 24)}`;
+
+/** Signed minutes: "+30 min", "−12 min", "at dawn". */
+export function offset(min: number): string {
+	if (min === 0) return 'at dawn';
+	return `${min > 0 ? '+' : '−'}${Math.abs(min)} min`;
+}

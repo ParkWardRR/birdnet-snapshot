@@ -1,12 +1,17 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import type { Report, Species } from '../lib/types';
-	import { day, hour, num, pct, stamp } from '../lib/format';
+	import { day, hour, num, offset, pct, shortHour, stamp } from '../lib/format';
+	import { CAST, colorAt } from '../lib/palette';
 	import HourClock from '../lib/components/HourClock.svelte';
 	import Heatmap from '../lib/components/Heatmap.svelte';
 	import DailyBars from '../lib/components/DailyBars.svelte';
 	import SpeciesCard from '../lib/components/SpeciesCard.svelte';
 	import RecordingCard from '../lib/components/RecordingCard.svelte';
+	import Ridgeline from '../lib/components/Ridgeline.svelte';
+	import Stream from '../lib/components/Stream.svelte';
+	import DawnPanels from '../lib/components/DawnPanels.svelte';
+	import ChartTable from '../lib/components/ChartTable.svelte';
 
 	let report = $state<Report | null>(null);
 	let failed = $state(false);
@@ -35,9 +40,35 @@
 	const credits = $derived(
 		report ? report.species.filter((s) => s.photo?.author).map((s) => ({ s, p: s.photo! })) : []
 	);
-	// Sections after "Listen" move up a numeral when there are no recordings.
-	const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
-	const numeral = (n: number) => ROMAN[n - 1 - (report?.recordings ? 0 : 1)];
+	// The hour-of-day charts draw the most-heard species; one species keeps one
+	// colour across all three charts.
+	const cast = $derived(
+		report ? report.species.slice(0, CAST).filter((s) => s.count > 0).map((s, i) => ({ s, color: colorAt(i) })) : []
+	);
+	const hasPatterns = $derived(cast.length >= 2);
+	const colorOf = (code: string) => colorAt(report?.species.findIndex((s) => s.code === code) ?? -1);
+
+	// Numerals follow the sections that are present.
+	const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'];
+	const nums = $derived.by(() => {
+		const keys = ['brief', report?.recordings && 'listen', 'rhythm', hasPatterns && 'patterns', 'regulars', 'notable', 'days', 'list'];
+		return Object.fromEntries(keys.filter(Boolean).map((k, i) => [k, ROMAN[i]])) as Record<string, string>;
+	});
+
+	// Table twins of the charts.
+	const hourHead = Array.from({ length: 24 }, (_, h) => shortHour(h));
+	const share = (n: number, t: number) => (!n ? '·' : n / t < 0.005 ? '<1%' : pct(n / t));
+	const shareRows = $derived(
+		cast.map(({ s }) => {
+			const t = s.hourly.reduce((a, b) => a + b, 0);
+			return { name: s.common, cells: s.hourly.map((n) => share(n, t)) };
+		})
+	);
+	const countRows = $derived(cast.map(({ s }) => ({ name: s.common, cells: s.hourly.map((n) => (n ? num(n) : '·')) })));
+	const dawnHead = $derived(report?.dawn?.series[0]?.days.map((d) => day(d.date, { month: 'short', day: 'numeric' })) ?? []);
+	const dawnRows = $derived(
+		(report?.dawn?.series ?? []).map((s) => ({ name: s.common, cells: s.days.map((d) => (d.minutes === null ? '–' : offset(d.minutes))) }))
+	);
 	const photoOf = (sci: string) => report?.species.find((s) => s.scientific === sci)?.photo;
 	const pdfName = $derived(report ? `field-notes-${report.period.end}.pdf` : 'field-notes.pdf');
 
@@ -108,7 +139,7 @@
 		</section>
 
 		<section class="brief">
-			<h2><span class="num">I</span> The period in brief</h2>
+			<h2><span class="num">{nums.brief}</span> The period in brief</h2>
 			<ol>
 				{#each report.highlights as h, i (i)}
 					<li>{h}</li>
@@ -118,7 +149,7 @@
 
 		{#if report.recordings}
 			<section class="listen">
-				<h2><span class="num">II</span> Listen</h2>
+				<h2><span class="num">{nums.listen}</span> Listen</h2>
 				<p class="dek">
 					Recordings straight from the station: the clearest calls of the period, and the latest birds it heard.
 					Tap a spectrogram to play from that point.
@@ -144,7 +175,7 @@
 		{/if}
 
 		<section class="rhythm">
-			<h2><span class="num">{numeral(3)}</span> Twenty-four hours</h2>
+			<h2><span class="num">{nums.rhythm}</span> Twenty-four hours</h2>
 			<p class="dek">
 				When the station heard birds, hour by hour across {report.period.days} days. Indigo marks the
 				hours between 7 pm and 6 am, when {pct(report.totals.nightShare)} of all detections happened.
@@ -152,14 +183,55 @@
 			<div class="rhythm-grid">
 				<div class="clock-wrap"><HourClock values={report.hourly} total={report.totals.detections} /></div>
 				<div class="heat-wrap">
-					<h3>Who sings when</h3>
+					<h3>Hour by hour</h3>
 					<Heatmap species={heat} />
 				</div>
 			</div>
 		</section>
 
+		{#if hasPatterns}
+			<section class="patterns">
+				<h2><span class="num">{nums.patterns}</span> The daily handoff</h2>
+				<p class="dek">
+					Who sings when, how the most-heard species take turns through the day, and how early the morning
+					singers start.
+				</p>
+				<div class="charts">
+					<div class="chart">
+						<h3>Who sings when</h3>
+						<p class="dek small">
+							Each ridge is one species' day, as a share of its own detections. A tall, narrow ridge is a bird
+							with its hour; a low, wide one calls around the clock.
+						</p>
+						<Ridgeline items={cast} />
+						<ChartTable label="Show as a table" corner="Share of detections" head={hourHead} rows={shareRows} />
+					</div>
+					<div class="chart">
+						<h3>Acoustic succession</h3>
+						<p class="dek small">
+							The {cast.length} most-heard species handing the day to each other. A band's thickness is its
+							detections in that hour.
+						</p>
+						<Stream items={cast} />
+						<ChartTable label="Show as a table" corner="Detections" head={hourHead} rows={countRows} />
+					</div>
+					{#if report.dawn}
+						<div class="chart">
+							<h3>Dawn chorus onset</h3>
+							<p class="dek small">
+								Minutes after civil dawn that each morning singer started, day by day; lower means earlier.
+								Birds that call at night, and days the station was not yet listening at dawn, are left out.
+							</p>
+							<DawnPanels series={report.dawn.series} {colorOf} />
+							<ChartTable label="Show as a table" corner="After civil dawn" head={dawnHead} rows={dawnRows} />
+						</div>
+					{/if}
+				</div>
+			</section>
+		{/if}
+
 		<section class="regulars page-break">
-			<h2><span class="num">{numeral(4)}</span> The regulars</h2>
+			<h2><span class="num">{nums.regulars}</span> The regulars</h2>
 			<p class="dek">The {regulars.length} most-heard species, with the hours they called.</p>
 			<div class="cards">
 				{#each regulars as s, i (s.code)}
@@ -169,7 +241,7 @@
 		</section>
 
 		<section class="notable page-break">
-			<h2><span class="num">{numeral(5)}</span> Worth noting</h2>
+			<h2><span class="num">{nums.notable}</span> Worth noting</h2>
 			<div class="notes">
 				{#if newcomers.length}
 					<div class="note">
@@ -231,7 +303,7 @@
 		</section>
 
 		<section class="days-sec">
-			<h2><span class="num">{numeral(6)}</span> Day by day</h2>
+			<h2><span class="num">{nums.days}</span> Day by day</h2>
 			<p class="dek">
 				Detections per day and how many species made them. The busiest day was
 				{day(report.totals.busiestDay, { weekday: 'long', month: 'long', day: 'numeric' })}.
@@ -240,7 +312,7 @@
 		</section>
 
 		<section class="list">
-			<h2><span class="num">{numeral(7)}</span> Every species</h2>
+			<h2><span class="num">{nums.list}</span> Every species</h2>
 			<table>
 				<thead>
 					<tr>
@@ -521,6 +593,25 @@
 		border-radius: 20px;
 		padding: 1.4rem;
 		break-inside: avoid;
+	}
+
+	/* Daily handoff: three chart cards */
+	.charts {
+		display: grid;
+		gap: 1.3rem;
+	}
+	.chart {
+		background: var(--card);
+		border: 1px solid var(--rule);
+		border-radius: 20px;
+		padding: 1.4rem 1.4rem 1.2rem;
+		break-inside: avoid;
+	}
+	.chart h3 {
+		margin: 0 0 0.2rem;
+	}
+	.chart .dek.small {
+		max-width: 40rem;
 	}
 
 	/* Recordings */
