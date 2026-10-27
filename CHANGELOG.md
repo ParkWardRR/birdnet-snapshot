@@ -2,6 +2,17 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [0.5.0] - 2026-10-27
+
+### Added
+
+- Field Notes shows when it was last updated: a chip on the cover ("Updated Oct 27, 7:29 am · 1 min ago", live while the tab is open, amber after 3 hours) and the same time in the tab title. The PDF prints the time without the "ago".
+- A favicon: a songbird on a branch in the report's forest, cream and gold, as SVG, ICO (16, 32, 48) and an Apple touch icon. `report/web/scripts/make-icons.sh` rebuilds the raster sizes from `static/favicon.svg`.
+
+### Removed
+
+- The SvelteKit placeholder icon that the page layout still linked.
+
 ## [0.4.0] - 2026-10-26
 
 ### Added

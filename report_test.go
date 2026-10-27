@@ -152,7 +152,7 @@ func TestBuildReport(t *testing.T) {
 	if err := buildReport(context.Background(), c, rc); err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []string{"index.html", "robots.txt", "data/report.json"} {
+	for _, f := range []string{"index.html", "robots.txt", "data/report.json", "favicon.svg", "favicon.ico", "apple-touch-icon.png"} {
 		if _, err := os.Stat(filepath.Join(out, f)); err != nil {
 			t.Errorf("missing %s", f)
 		}

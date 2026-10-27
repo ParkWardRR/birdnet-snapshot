@@ -136,6 +136,7 @@ set -a; . ./notes.env; set +a; birdnet-snapshot report -out field-notes -deploy 
 - **Recordings:** the 3 best clips of the period (models agreeing first, then confidence) and the 3 latest, one per species in each list, each a spectrogram you can tap to play from that point. Clips follow the snapshot's rules: none from `-skip-audio` sources, none with `-no-audio`, none marked false positive in BirdNET-Go, none below `-clip-min` confidence (0.5). `-clips 0` leaves the section out. The PDF shows the spectrograms.
 - **The PDF** is the same page printed by headless Chrome with a print stylesheet (US Letter, covers and sections on their own pages, nine species cards per page). `-pdf=false` skips it.
 - **Daily patterns:** three charts drawn in the page itself (no chart library, so the report stays small). *Who sings when* is a ridgeline, one ridge per species as a share of its own detections, rows from earliest singer to latest. *Acoustic succession* is a streamgraph of detections per hour for the five most-heard species. *Dawn chorus onset* is one small panel per morning singer: minutes after civil dawn it started, day by day, on a shared scale. Hover (or arrow-key through the hours) for exact values; each chart has a collapsed table twin. Species keep one colour across all three, from a palette checked for colour-blind separation. Night species and days the station was not yet listening at dawn are left out of the onset panels, and it needs two usable days before it appears.
+- **Last updated:** the cover says when the report was built ("Updated Oct 27, 7:29 am · 1 min ago", the "ago" ticking while the tab is open, amber after 3 hours) and so does the tab title. The PDF keeps the time and drops the "ago". The page has a songbird favicon (SVG, ICO and Apple touch icon); `report/web/static/favicon.svg` is the source and `report/web/scripts/make-icons.sh` rebuilds the raster sizes with Chrome and ImageMagick.
 - **On a schedule:** [`deploy/systemd/birdnet-report.{service,timer}`](deploy/systemd/) rebuild and publish the report every hour from `~/.config/birdnet-report/env` (start from [`deploy/report.env.example`](deploy/report.env.example), with its own storage zone). Only changed files are uploaded (a few MB when the latest recordings change). It sits beside the snapshot timer; its Chrome uses port 9223. Setup is under [systemd timer with the binary](#running-it-on-a-schedule).
 - **Privacy:** aggregate counts per species and hour plus the six clips above. The dawn-onset panels are the one part that depends on the station location: BirdNET-Go works out civil dawn from its coordinates, and only each species' offset in minutes is copied, never the dawn time or the coordinates. Offsets next to the hourly charts could still hint roughly at the region, so `-dawn=false` leaves them out. No coordinates (they are never copied from BirdNET-Go), no source names, `-forbid` checked against the report data; night is a fixed 7 pm–6 am window because real sunrise times would reveal latitude. A station younger than the period gets a report covering only the days it listened.
 
@@ -145,7 +146,7 @@ set -a; . ./notes.env; set +a; birdnet-snapshot report -out field-notes -deploy 
 
 ```sh
 # pick your platform from https://github.com/ParkWardRR/birdnet-snapshot/releases
-v=0.4.0
+v=0.5.0
 curl -L https://github.com/ParkWardRR/birdnet-snapshot/releases/download/v$v/birdnet-snapshot_${v}_linux_amd64.tar.gz | tar -xz
 sudo install birdnet-snapshot_${v}_linux_amd64/birdnet-snapshot /usr/local/bin/
 ```
@@ -166,7 +167,7 @@ docker pull ghcr.io/parkwardrr/birdnet-snapshot:latest
 birdnet-snapshot check -birdnet http://127.0.0.1:8080
 ```
 ```
-birdnet-snapshot v0.4.0 check
+birdnet-snapshot v0.5.0 check
   ✓ birdnet    http://127.0.0.1:8080, BirdNET-Go 20261014
   ✓ chrome     Chrome/157.0.8103.15 (launched)
   - bunny      not configured (BUNNY_STORAGE_ZONE / BUNNY_STORAGE_KEY); crawl and serve still work

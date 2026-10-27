@@ -72,13 +72,31 @@
 	const photoOf = (sci: string) => report?.species.find((s) => s.scientific === sci)?.photo;
 	const pdfName = $derived(report ? `field-notes-${report.period.end}.pdf` : 'field-notes.pdf');
 
+	// How fresh the page is. It is rebuilt every hour, so say when, and keep the
+	// "ago" ticking for anyone who leaves the tab open.
+	let now = $state(Date.now());
+	$effect(() => {
+		const t = setInterval(() => (now = Date.now()), 30_000);
+		return () => clearInterval(t);
+	});
+	const age = $derived(report ? Math.floor((now - Date.parse(report.generatedAt)) / 60_000) : 0);
+	const ago = $derived(
+		age < 1
+			? 'just now'
+			: age < 60
+				? `${age} min ago`
+				: age < 1440
+					? `${Math.floor(age / 60)} h ago`
+					: `${Math.floor(age / 1440)} d ago`
+	);
+
 	onMount(async () => {
 		printMode = new URLSearchParams(location.search).has('print');
 		try {
 			const r = await fetch('data/report.json', { cache: 'no-cache' });
 			if (!r.ok) throw new Error(String(r.status));
 			report = await r.json();
-			document.title = `${report!.title} · ${report!.period.label}`;
+			document.title = `${report!.title} · ${report!.period.label} · updated ${stamp(report!.generatedAt)}`;
 		} catch {
 			failed = true;
 		}
@@ -117,6 +135,11 @@
 			<img class="hero" src={top.photo.large} alt={top.common} loading="eager" />
 		{/if}
 		<div class="veil"></div>
+		<p class="updated" title="Rebuilt every hour">
+			<span class="pulse" class:stale={age >= 180} aria-hidden="true"></span>
+			Updated <time datetime={report.generatedAt}>{stamp(report.generatedAt)}</time>
+			<span class="ago no-print">· {ago}</span>
+		</p>
 		<div class="masthead">
 			<p class="kicker">{report.station}</p>
 			<h1>{report.title}</h1>
@@ -470,6 +493,43 @@
 		text-transform: uppercase;
 		margin: 0;
 		color: var(--gold);
+	}
+	.updated {
+		position: absolute;
+		left: clamp(1.25rem, 6vw, 5rem);
+		top: 1.1rem;
+		margin: 0;
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		font: 500 0.74rem var(--sans);
+		letter-spacing: 0.02em;
+		color: rgba(248, 243, 232, 0.96);
+		background: rgba(20, 26, 22, 0.45);
+		padding: 0.38rem 0.8rem;
+		border-radius: 999px;
+		backdrop-filter: blur(4px);
+	}
+	.updated .ago {
+		opacity: 0.8;
+	}
+	.pulse {
+		width: 0.5rem;
+		height: 0.5rem;
+		border-radius: 50%;
+		background: #86d596;
+		box-shadow: 0 0 0 3px rgba(134, 213, 150, 0.25);
+		margin-right: 0.15rem;
+	}
+	.pulse.stale {
+		background: var(--gold);
+		box-shadow: 0 0 0 3px rgba(212, 162, 76, 0.28);
+	}
+	/* On a phone the Download and Print buttons take the top-right corner. */
+	@media (max-width: 760px) {
+		.updated {
+			top: 4.1rem;
+		}
 	}
 	.hero-caption {
 		position: absolute;

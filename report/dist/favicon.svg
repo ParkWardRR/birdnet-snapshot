@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Field Notes</title>
+  <rect width="64" height="64" rx="14" fill="#2f5d3a"/>
+  <g transform="translate(31 32) scale(1.08) translate(-31 -32)">
+    <polygon points="17,37 6,47 10,51 25,44" fill="#f4efe4"/>
+    <ellipse cx="30" cy="35" rx="16" ry="11" transform="rotate(-16 30 35)" fill="#f4efe4"/>
+    <circle cx="43" cy="25" r="9" fill="#f4efe4"/>
+    <polygon points="50,22 58,26 50,29.5" fill="#d4a24c"/>
+    <circle cx="45.5" cy="23.5" r="2" fill="#2f5d3a"/>
+    <path d="M23 34 C28 31 36 33 40 39" fill="none" stroke="#2f5d3a" stroke-width="2.4" stroke-linecap="round" opacity=".4"/>
+    <path d="M31 45 V53 M37 44 V53" stroke="#d4a24c" stroke-width="2.6" stroke-linecap="round"/>
+    <path d="M13 54 H52" stroke="#d4a24c" stroke-width="3.2" stroke-linecap="round"/>
+  </g>
+</svg>

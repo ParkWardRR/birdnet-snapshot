@@ -45,6 +45,7 @@ One Go binary (or a container with Chrome bundled) that turns a live BirdNET-Go 
 
 | Version | Highlights |
 |---|---|
+| v0.5.0 | Field Notes "Updated" chip and title, favicon |
 | v0.4.0 | Field Notes daily handoff: ridgeline, streamgraph and dawn-onset panels |
 | v0.3.0 | Field Notes recordings (3 best, 3 latest); `-forbid` skips binary files |
 | v0.2.0 | Field Notes: an illustrated report page and PDF |
