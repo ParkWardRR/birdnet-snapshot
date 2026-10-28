@@ -41,6 +41,9 @@ type reportData struct {
 	Highlights  []string          `json:"highlights"`
 	Recordings  *reportRecordings `json:"recordings,omitempty"`
 	Dawn        *reportDawn       `json:"dawn,omitempty"`
+	Issue       *reportIssue      `json:"issue,omitempty"`      // set when this report is a frozen weekly issue
+	IssueCount  int               `json:"issueCount,omitempty"` // issues in the archive
+	Feed        bool              `json:"feed,omitempty"`       // the site has an Atom feed
 	Compare     *reportCompare    `json:"compare,omitempty"`
 	Quality     *reportQuality    `json:"quality,omitempty"`
 	Growth      *reportGrowth     `json:"growth,omitempty"`
@@ -127,11 +130,32 @@ type reportConfig struct {
 	PrometheusUser string
 	PrometheusPass string
 	SoundMetric    string
+
+	// Weekly issues: a store directory ("" leaves the archive off), how many
+	// finished weeks to freeze at most in one run, the site's public address (for
+	// the feed and link previews), whether to render a share image, and where to
+	// announce a new issue.
+	IssuesDir  string
+	IssueWeeks int
+	URL        string
+	Share      bool
+	Notify     ntfyFlags
 }
 
 // buildReport gathers the last rc.Days days from BirdNET-Go and writes the
-// report site (page, data, photos, recordings, PDF) to c.Out.
+// report site (page, data, photos, recordings, PDF, archive, feed) to c.Out.
 func buildReport(ctx context.Context, c config, rc reportConfig) error {
+	_, err := buildReportOutcome(ctx, c, rc)
+	return err
+}
+
+// reportOutcome is what a build did that the caller may act on once the site
+// is live.
+type reportOutcome struct {
+	Created []issueEntry // issues frozen by this run, oldest first
+}
+
+func buildReportOutcome(ctx context.Context, c config, rc reportConfig) (*reportOutcome, error) {
 	start := time.Now()
 	loc, _ := serverZone(ctx, c.BirdNET)
 	end := time.Now().In(loc)
@@ -139,32 +163,92 @@ func buildReport(ctx context.Context, c config, rc reportConfig) error {
 		rc.Days = 7
 	}
 	first := end.AddDate(0, 0, -(rc.Days - 1))
+
+	// Weeks that have ended become issues, once. A failure leaves them for the
+	// next run and never stops the rolling report.
+	store := issueStore{dir: rc.IssuesDir}
+	var created []string
+	if store.enabled() {
+		created = store.ensure(ctx, c, rc, loc, end)
+	}
 	d, dets, err := collectReport(ctx, c, rc, loc, first, end, end)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	if store.enabled() {
+		d.IssueCount = len(store.ids())
+		d.Feed = rc.URL != ""
 	}
 	tmp := c.Out + ".tmp"
 	if err := writeReportSite(ctx, c, rc, d, dets, tmp); err != nil {
-		return err
+		return nil, err
 	}
-	// -forbid applies to the report data too.
-	red, err := newRedactor(c)
-	if err != nil {
-		return err
+	var idx *issueIndex
+	if store.enabled() {
+		if idx, err = store.assemble(tmp, rc.URL != ""); err != nil {
+			return nil, fmt.Errorf("issues: %w", err)
+		}
 	}
-	if b, err := os.ReadFile(filepath.Join(tmp, "data", "report.json")); err != nil {
-		return err
-	} else if err := red.check("data/report.json", b); err != nil {
-		return err
+	if rc.URL != "" {
+		if idx != nil {
+			if err := writeFeed(tmp, rc.URL, rc.Title, rc.Subtitle, idx, end); err != nil {
+				return nil, fmt.Errorf("feed: %w", err)
+			}
+		}
+		image := ""
+		if rc.Share {
+			if name, err := renderShareImage(ctx, c, tmp); err != nil {
+				log.Printf("report: no share image (%v)", err)
+			} else {
+				image = "/" + name
+			}
+		}
+		desc := fmt.Sprintf("%s detections of %d species, %s", commas(d.Totals.Detections), d.Totals.Species, d.Period.Label)
+		if err := injectHead(tmp, rc.URL, d.Title+" · "+d.Period.Label, desc, image, idx != nil); err != nil {
+			return nil, err
+		}
+	}
+	// -forbid applies to everything that is text: the data, the feed, the page.
+	if err := scanForbidden(c, tmp); err != nil {
+		return nil, err
 	}
 	if err := os.RemoveAll(c.Out); err != nil {
-		return err
+		return nil, err
 	}
 	if err := os.Rename(tmp, c.Out); err != nil {
-		return err
+		return nil, err
+	}
+	out := &reportOutcome{}
+	if idx != nil {
+		for _, id := range created {
+			for _, e := range idx.Issues {
+				if e.ID == id {
+					out.Created = append(out.Created, e)
+				}
+			}
+		}
+		sort.Slice(out.Created, func(i, j int) bool { return out.Created[i].Number < out.Created[j].Number })
 	}
 	log.Printf("report: %s, %d species, %d detections, built %s in %s", d.Period.Label, d.Totals.Species, d.Totals.Detections, c.Out, time.Since(start).Round(time.Second))
-	return nil
+	return out, nil
+}
+
+// notifyIssues sends the digest for the newest issue this run froze. (A first
+// run that backfills several weeks announces only the latest.)
+func notifyIssues(ctx context.Context, rc reportConfig, out *reportOutcome) {
+	if out == nil || len(out.Created) == 0 || !rc.Notify.enabled() {
+		return
+	}
+	e := out.Created[len(out.Created)-1]
+	m := issueDigest(e, rc.URL)
+	if n := len(out.Created); n > 1 {
+		m.Message += fmt.Sprintf("\n(%d earlier issues were added to the archive.)", n-1)
+	}
+	if err := rc.Notify.send(ctx, m); err != nil {
+		log.Printf("report: digest not sent: %v", err)
+		return
+	}
+	log.Printf("report: digest for No. %d sent", e.Number)
 }
 
 // daysBetween counts the calendar days from first to end, both included.

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import type { Report, Species } from '../lib/types';
+	import type { IssueIndex, Report, Species } from '../lib/types';
 	import { addDays, day, hour, num, offset, pct, shortHour, stamp } from '../lib/format';
 	import { CAST, colorAt } from '../lib/palette';
 	import HourClock from '../lib/components/HourClock.svelte';
@@ -18,11 +18,15 @@
 	import Soundscape from '../lib/components/Soundscape.svelte';
 	import SpeciesDetail from '../lib/components/SpeciesDetail.svelte';
 	import ChangeChip from '../lib/components/ChangeChip.svelte';
+	import Archive from '../lib/components/Archive.svelte';
+	import ShareCard from '../lib/components/ShareCard.svelte';
 	import { player } from '../lib/player.svelte';
 
 	let report = $state<Report | null>(null);
 	let failed = $state(false);
 	let printMode = $state(false);
+	let archive = $state<IssueIndex | null>(null);
+	let cardMode = $state(false);
 
 	const top = $derived(report?.species[0]);
 	const regulars = $derived(report ? report.species.slice(0, 9) : []);
@@ -118,13 +122,30 @@
 	onMount(async () => {
 		printMode = new URLSearchParams(location.search).has('print');
 		try {
-			const r = await fetch('data/report.json', { cache: 'no-cache' });
+			const q = new URLSearchParams(location.search);
+			cardMode = q.has('card');
+			const issue = q.get('issue');
+			const wantArchive = q.has('archive');
+			const src = wantArchive
+				? 'data/issues.json'
+				: issue && /^\d{4}-w\d{2}$/.test(issue)
+					? 'data/issues/' + issue + '.json'
+					: 'data/report.json';
+			const r = await fetch(src, { cache: 'no-cache' });
 			if (!r.ok) throw new Error(String(r.status));
-			report = await r.json();
-			document.title = `${report!.title} · ${report!.period.label} · updated ${stamp(report!.generatedAt)}`;
-			const code = new URLSearchParams(location.search).get('species');
-			if (code && !printMode) selected = report!.species.find((s) => s.code === code) ?? null;
+			if (wantArchive) {
+				archive = await r.json();
+				document.title = 'Field Notes archive';
+			} else {
+				report = await r.json();
+				const rep = report!;
+				const no = rep.issue ? ' No. ' + rep.issue.number : '';
+				document.title = rep.title + no + ' · ' + rep.period.label + (rep.issue ? '' : ' · updated ' + stamp(rep.generatedAt));
+				const code = q.get('species');
+				if (code && !printMode) selected = rep.species.find((s) => s.code === code) ?? null;
+			}
 		} catch {
+
 			failed = true;
 		}
 		await tick();
@@ -166,9 +187,14 @@
 		<h1>Field Notes</h1>
 		<p>The first report is being prepared. Check back soon.</p>
 	</main>
+{:else if archive}
+	<Archive idx={archive} title="Field Notes" />
 {:else if !report}
 	<main class="empty"><p class="loading">Opening the notebook…</p></main>
+{:else if cardMode}
+	<ShareCard {report} />
 {:else}
+
 	<nav class="actions no-print">
 		{#if report.pdf}<a class="btn" href={report.pdf} download={pdfName}>Download PDF</a>{/if}
 		<button class="btn ghost" onclick={onPrint}>Print</button>
@@ -180,13 +206,31 @@
 			<img class="hero" src={top.photo.large} alt={top.common} loading="eager" />
 		{/if}
 		<div class="veil"></div>
-		<p class="updated" title="Rebuilt every hour">
-			<span class="pulse" class:stale={age >= 180} aria-hidden="true"></span>
-			Updated <time datetime={report.generatedAt}>{stamp(report.generatedAt)}</time>
-			<span class="ago no-print">· {ago}</span>
-		</p>
+		<div class="topbar">
+				{#if report.issue}
+					<p class="updated">
+						<span class="pulse issue" aria-hidden="true"></span>
+						Issue No. {report.issue.number}, published <time datetime={report.issue.published}>{stamp(report.issue.published)}</time>
+					</p>
+				{:else}
+					<p class="updated" title="Rebuilt every hour">
+						<span class="pulse" class:stale={age >= 180} aria-hidden="true"></span>
+						Updated <time datetime={report.generatedAt}>{stamp(report.generatedAt)}</time>
+						<span class="ago no-print">· {ago}</span>
+					</p>
+				{/if}
+				<nav class="issues no-print" aria-label="Issues">
+					{#if report.issue?.prev}<a href="?issue={report.issue.prev}">← Previous</a>{/if}
+					{#if report.issue?.next}<a href="?issue={report.issue.next}">Next →</a>{/if}
+					{#if report.issue}<a href="./">Latest</a>{/if}
+					{#if report.issueCount}<a href="?archive">Past issues ({report.issueCount})</a>{/if}
+					{#if report.feed}<a href="feed.xml">Feed</a>{/if}
+				</nav>
+			</div>
+
 		<div class="masthead">
-			<p class="kicker">{report.station}</p>
+			<p class="kicker">{report.station}{#if report.issue} · No. {report.issue.number}{/if}</p>
+
 			<h1>{report.title}</h1>
 			<p class="subtitle">{report.subtitle}</p>
 			<p class="period">{report.period.label}</p>
@@ -612,10 +656,39 @@
 		margin: 0;
 		color: var(--gold);
 	}
-	.updated {
+	.topbar {
 		position: absolute;
 		left: clamp(1.25rem, 6vw, 5rem);
 		top: 1.1rem;
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.5rem;
+	}
+	.issues {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem 0.5rem;
+	}
+	.issues a {
+		font: 600 0.7rem var(--sans);
+		letter-spacing: 0.04em;
+		color: rgba(248, 243, 232, 0.96);
+		background: rgba(20, 26, 22, 0.45);
+		padding: 0.3rem 0.7rem;
+		border-radius: 999px;
+		text-decoration: none;
+		backdrop-filter: blur(4px);
+	}
+	.issues a:hover {
+		background: rgba(20, 26, 22, 0.7);
+	}
+	.pulse.issue {
+		background: var(--gold);
+		box-shadow: 0 0 0 3px rgba(212, 162, 76, 0.28);
+	}
+	.updated {
+
 		margin: 0;
 		display: flex;
 		align-items: center;
@@ -645,7 +718,7 @@
 	}
 	/* On a phone the Download and Print buttons take the top-right corner. */
 	@media (max-width: 760px) {
-		.updated {
+		.topbar {
 			top: 4.1rem;
 		}
 	}

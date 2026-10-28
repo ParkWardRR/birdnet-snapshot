@@ -76,6 +76,9 @@ export interface Report {
 	growth?: Growth;
 	weather?: Weather;
 	soundscape?: Soundscape;
+	issue?: IssueRef;
+	issueCount?: number;
+	feed?: boolean;
 }
 
 /** One morning singer's dawn-chorus onset, a point per day of the period. */
@@ -138,4 +141,32 @@ export interface Soundscape {
 	quietest: number;
 	loudest: number;
 	insight?: string;
+}
+
+/** Marks a report as a frozen weekly issue. */
+export interface IssueRef {
+	id: string;
+	number: number;
+	published: string;
+	prev?: string;
+	next?: string;
+}
+
+export interface IssueEntry {
+	id: string;
+	number: number;
+	label: string;
+	start: string;
+	end: string;
+	published: string;
+	detections: number;
+	species: number;
+	top?: string;
+	topPhoto?: string;
+	summary?: string;
+	pdf?: string;
+}
+
+export interface IssueIndex {
+	issues: IssueEntry[];
 }

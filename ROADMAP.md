@@ -32,6 +32,7 @@ One Go binary (or a container with Chrome bundled) that turns a live BirdNET-Go 
 | Soon | Source labels: rename audio sources in published data (e.g. "Doorbell" → "Front") | Idea |
 | Soon | Search: pre-record searches for every detected species name so the search box works offline | Idea |
 | Soon | Field Notes: month and season editions, year-over-year comparisons once there is history | Idea |
+| Soon | Field Notes: an `issues` command to re-freeze a week by hand (today: delete its directory in the store) | Idea |
 | Later | Snapshot history: keep dated snapshots side by side (`/2026-10-24/`) with a picker | Idea |
 | Later | Optional password gate via Bunny token authentication | Idea |
 | Later | BirdNET-Pi / BirdNET-PiPy support | Idea |
@@ -45,6 +46,7 @@ One Go binary (or a container with Chrome bundled) that turns a live BirdNET-Go 
 
 | Version | Highlights |
 |---|---|
+| v0.8.0 | Field Notes weekly issues, archive, Atom feed, share image, ntfy digest |
 | v0.7.0 | Field Notes: week over week, quality, species growth, weather, soundscape, species view, Play all |
 | v0.6.0 | `audit` and `rare` commands with ntfy |
 | v0.5.0 | Field Notes "Updated" chip and title, favicon |

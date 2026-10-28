@@ -159,6 +159,13 @@ func parseFlags(cmd string, args []string) (config, string, reportConfig) {
 	fs.Float64Var(&rc.ClipMin, "clip-min", envFloat("REPORT_CLIP_MIN", 0.5), "report: lowest `confidence` a published recording may have [REPORT_CLIP_MIN]")
 	fs.BoolVar(&rc.Dawn, "dawn", envBool("REPORT_DAWN", true), "report: chart the dawn-chorus onset of the morning singers (minutes from civil dawn; BirdNET-Go works dawn out from the station location, only the offset is published) [REPORT_DAWN]")
 	fs.BoolVar(&rc.Weather, "weather", envBool("REPORT_WEATHER", true), "report: chart activity against the hourly weather BirdNET-Go stores [REPORT_WEATHER]")
+	fs.StringVar(&rc.IssuesDir, "issues", env("REPORT_ISSUES", ""), "report: `dir` keeping the weekly issues (default <out>-issues; off disables the archive) [REPORT_ISSUES]")
+	fs.IntVar(&rc.IssueWeeks, "issue-weeks", envInt("REPORT_ISSUE_WEEKS", 12), "report: freeze at most this many finished weeks in one run [REPORT_ISSUE_WEEKS]")
+	fs.StringVar(&rc.URL, "url", env("REPORT_URL", ""), "report: public `address` of the site, for the Atom feed and link previews [REPORT_URL]")
+	fs.BoolVar(&rc.Share, "share", envBool("REPORT_SHARE", true), "report: render a share image for link previews (needs -url) [REPORT_SHARE]")
+	rc.Notify = ntfyFromEnv()
+	fs.StringVar(&rc.Notify.URL, "ntfy", rc.Notify.URL, "report: ntfy topic `url` to announce a new issue on [NTFY_URL]")
+	fs.StringVar(&rc.Notify.Token, "ntfy-token", rc.Notify.Token, "report: ntfy access `token` [NTFY_TOKEN]")
 	fs.IntVar(&rc.SpeciesClips, "species-clips", envInt("REPORT_SPECIES_CLIPS", 2), "report: recordings for each of the 12 most-heard species, for the species view (0 = none) [REPORT_SPECIES_CLIPS]")
 	fs.StringVar(&rc.Prometheus, "prometheus", env("REPORT_PROMETHEUS", ""), "report: Prometheus `url` holding BirdNET-Go's sound-level metrics, for the soundscape [REPORT_PROMETHEUS]")
 	fs.StringVar(&rc.PrometheusUser, "prometheus-user", env("REPORT_PROMETHEUS_USER", ""), "report: basic-auth `user` for Prometheus (the password is REPORT_PROMETHEUS_PASSWORD) [REPORT_PROMETHEUS_USER]")
@@ -171,6 +178,13 @@ func parseFlags(cmd string, args []string) (config, string, reportConfig) {
 	_ = fs.Parse(args)
 	c.ZoneKey = os.Getenv("BUNNY_STORAGE_KEY")
 	rc.PrometheusPass = os.Getenv("REPORT_PROMETHEUS_PASSWORD")
+	switch rc.IssuesDir {
+	case "":
+		rc.IssuesDir = c.Out + "-issues"
+	case "off":
+		rc.IssuesDir = ""
+	}
+	rc.URL = trimSlash(rc.URL)
 	c.SkipAudio = splitList(strings.ToLower(*skip))
 	c.Routes = splitList(*routes)
 	c.Redact = splitList(*redact)

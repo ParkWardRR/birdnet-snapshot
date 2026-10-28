@@ -2,6 +2,19 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [0.8.0] - 2026-10-28
+
+### Added
+
+- Field Notes **weekly issues**: every finished ISO week (Monday to Sunday) is frozen once as *Field Notes No. N*, with its own data, photos, recordings and PDF, in a store that survives the hourly site rebuild (`-issues`, `-issue-weeks`). `?issue=2026-w43` opens one, with previous / next / latest links, and `?archive` lists them all.
+- **Atom feed** (`feed.xml`, with a PDF enclosure per issue) and **link previews** (Open Graph and Twitter tags, plus a 1200×630 share image rendered by the Chrome that prints the PDF; `?card=1` is the card), both with `-url` (`-share` to turn the image off).
+- **Digest**: `report -ntfy URL` announces a new issue on ntfy after the site is deployed, once. A first run that backfills several weeks announces only the newest.
+- `-forbid` now also covers `.xml` and `.html` files of a report.
+
+### Changed
+
+- A past week's soundscape ends with that week.
+
 ## [0.7.0] - 2026-10-28
 
 ### Added

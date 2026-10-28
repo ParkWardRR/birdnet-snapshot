@@ -494,6 +494,10 @@ func bandName(hz float64) string {
 func collectSoundscape(ctx context.Context, rc reportConfig, d *reportData, loc *time.Location, now time.Time) (*reportSoundscape, error) {
 	metric := orDefault(rc.SoundMetric, "myaudio_octave_band_level_db")
 	first, _ := time.ParseInLocation("2006-01-02", d.Period.Start, loc)
+	// A past week stops at its own last evening.
+	if last, err := time.ParseInLocation("2006-01-02", d.Period.End, loc); err == nil && last.AddDate(0, 0, 1).Before(now) {
+		now = last.AddDate(0, 0, 1)
+	}
 	q := url.Values{
 		"query": {fmt.Sprintf("avg by (frequency_band) (avg_over_time(%s[1h]))", metric)},
 		"start": {strconv.FormatInt(first.Unix(), 10)}, "end": {strconv.FormatInt(now.Unix(), 10)}, "step": {"3600"},
