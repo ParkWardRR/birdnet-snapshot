@@ -153,6 +153,8 @@ func buildReport(ctx context.Context, c config, rc reportConfig) error {
 // is live.
 type reportOutcome struct {
 	Created []issueEntry // issues frozen by this run, oldest first
+	store   issueStore
+	index   *issueIndex
 }
 
 func buildReportOutcome(ctx context.Context, c config, rc reportConfig) (*reportOutcome, error) {
@@ -218,7 +220,7 @@ func buildReportOutcome(ctx context.Context, c config, rc reportConfig) (*report
 	if err := os.Rename(tmp, c.Out); err != nil {
 		return nil, err
 	}
-	out := &reportOutcome{}
+	out := &reportOutcome{store: store, index: idx}
 	if idx != nil {
 		for _, id := range created {
 			for _, e := range idx.Issues {
@@ -233,20 +235,41 @@ func buildReportOutcome(ctx context.Context, c config, rc reportConfig) (*report
 	return out, nil
 }
 
-// notifyIssues sends the digest for the newest issue this run froze. (A first
-// run that backfills several weeks announces only the latest.)
+// notifyIssues announces the newest issue that has not been announced yet, once
+// the site that shows it is live. Issues are marked as they are announced, so a
+// failed deploy or an unreachable ntfy server is retried by the next run; the
+// older ones announced with it are only counted. (A first run that backfills
+// several weeks therefore sends one message.)
 func notifyIssues(ctx context.Context, rc reportConfig, out *reportOutcome) {
-	if out == nil || len(out.Created) == 0 || !rc.Notify.enabled() {
+	if out == nil || out.index == nil || !rc.Notify.enabled() {
 		return
 	}
-	e := out.Created[len(out.Created)-1]
+	byID := map[string]issueEntry{}
+	for _, e := range out.index.Issues {
+		byID[e.ID] = e
+	}
+	var pending []string
+	for _, id := range out.store.ids() {
+		if !out.store.announced(id) {
+			pending = append(pending, id)
+		}
+	}
+	if len(pending) == 0 {
+		return
+	}
+	e := byID[pending[len(pending)-1]]
 	m := issueDigest(e, rc.URL)
-	if n := len(out.Created); n > 1 {
+	if n := len(pending); n > 1 {
 		m.Message += fmt.Sprintf("\n(%d earlier issues were added to the archive.)", n-1)
 	}
 	if err := rc.Notify.send(ctx, m); err != nil {
 		log.Printf("report: digest not sent: %v", err)
 		return
+	}
+	for _, id := range pending {
+		if err := out.store.markAnnounced(id); err != nil {
+			log.Printf("report: %v", err)
+		}
 	}
 	log.Printf("report: digest for No. %d sent", e.Number)
 }

@@ -2,6 +2,12 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [0.8.1] - 2026-10-28
+
+### Fixed
+
+- The new-issue digest was never sent: `report` did not call it. It now runs after the deploy, and each issue is marked as announced in the store, so a failed deploy or an unreachable ntfy server is retried by the next run instead of lost.
+
 ## [0.8.0] - 2026-10-28
 
 ### Added

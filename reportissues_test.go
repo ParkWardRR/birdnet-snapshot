@@ -312,6 +312,12 @@ func TestBuildReportWithIssues(t *testing.T) {
 		t.Errorf("push %v", pushed[0])
 	}
 
+	for _, e := range out.Created {
+		if !out.store.announced(e.ID) {
+			t.Errorf("issue %s sent but not marked", e.ID)
+		}
+	}
+
 	// A second build creates and announces nothing.
 	out2, err := buildReportOutcome(context.Background(), c, rc)
 	if err != nil || len(out2.Created) != 0 {
@@ -320,6 +326,44 @@ func TestBuildReportWithIssues(t *testing.T) {
 	notifyIssues(context.Background(), rc, out2)
 	if len(pushed) != 1 {
 		t.Errorf("repeat push: %d", len(pushed))
+	}
+}
+
+func TestDigestRetriesAfterFailure(t *testing.T) {
+	t.Setenv("TZ", "America/Los_Angeles")
+	loc, _ := time.LoadLocation("America/Los_Angeles")
+	days := map[string]map[string]int{}
+	for back := 0; back <= 10; back++ {
+		days[dayKey(loc, back)] = map[string]int{"Haemorhous mexicanus": 5}
+	}
+	srv := history{names: map[string]string{"Haemorhous mexicanus": "House Finch"}, days: days}.server(t)
+	up, sent := false, 0
+	ntfySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !up {
+			http.Error(w, "down", http.StatusBadGateway)
+			return
+		}
+		sent++
+	}))
+	defer ntfySrv.Close()
+	root := t.TempDir()
+	c := config{BirdNET: srv.URL, Out: filepath.Join(root, "site")}
+	rc := reportConfig{Title: "t", Days: 7, IssuesDir: filepath.Join(root, "issues"), IssueWeeks: 12, URL: "https://n.example.com", Notify: ntfyFlags{ntfy: ntfy{URL: ntfySrv.URL + "/birds"}}}
+
+	out, err := buildReportOutcome(context.Background(), c, rc)
+	if err != nil || len(out.Created) == 0 {
+		t.Fatalf("%v %v", out, err)
+	}
+	notifyIssues(context.Background(), rc, out) // ntfy is down
+	if sent != 0 || out.store.announced(out.Created[0].ID) {
+		t.Fatal("a failed push was recorded as sent")
+	}
+	up = true
+	out, _ = buildReportOutcome(context.Background(), c, rc) // nothing new, but the digest is still owed
+	notifyIssues(context.Background(), rc, out)
+	notifyIssues(context.Background(), rc, out)
+	if sent != 1 {
+		t.Fatalf("%d pushes, want 1", sent)
 	}
 }
 

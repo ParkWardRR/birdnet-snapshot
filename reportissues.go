@@ -101,6 +101,16 @@ func (s issueStore) ids() []string {
 	return out
 }
 
+// announced reports whether the issue's digest has been sent.
+func (s issueStore) announced(id string) bool {
+	_, err := os.Stat(filepath.Join(s.dir, id, "announced"))
+	return err == nil
+}
+
+func (s issueStore) markAnnounced(id string) error {
+	return os.WriteFile(filepath.Join(s.dir, id, "announced"), []byte(time.Now().Format(time.RFC3339)+"\n"), 0o644)
+}
+
 // ensure freezes every finished week that has no issue yet (the last max
 // weeks, since the station first heard anything) and returns the new ones.
 // A week that fails is logged and left for the next run.

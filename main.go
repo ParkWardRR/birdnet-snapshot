@@ -104,8 +104,12 @@ func main() {
 	case "check":
 		err = check(ctx, c)
 	case "report":
-		if err = buildReport(ctx, c, rc); err == nil && rc.Deploy {
+		var out *reportOutcome
+		if out, err = buildReportOutcome(ctx, c, rc); err == nil && rc.Deploy {
 			_, err = deploy(ctx, c)
+		}
+		if err == nil {
+			notifyIssues(ctx, rc, out) // only once the issue is live
 		}
 	default:
 		usage()
