@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -399,3 +400,22 @@ func TestScanForbidden(t *testing.T) {
 }
 
 func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }
+
+func TestReportMetrics(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "r.prom")
+	start := time.Now().Add(-5 * time.Second)
+	if err := writeReportMetrics(path, start, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	first := readGauge(path, "birdnet_report_last_success_timestamp_seconds")
+	if first == 0 || readGauge(path, "birdnet_report_last_run_success") != 1 {
+		t.Fatalf("success not recorded: %v", first)
+	}
+	// A failed run keeps the last success time and says it failed.
+	if err := writeReportMetrics(path, time.Now(), nil, fmt.Errorf("boom")); err != nil {
+		t.Fatal(err)
+	}
+	if readGauge(path, "birdnet_report_last_success_timestamp_seconds") != first || readGauge(path, "birdnet_report_last_run_success") != 0 {
+		t.Error("a failed run overwrote the last success")
+	}
+}

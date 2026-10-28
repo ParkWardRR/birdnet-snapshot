@@ -104,12 +104,18 @@ func main() {
 	case "check":
 		err = check(ctx, c)
 	case "report":
+		started := time.Now()
 		var out *reportOutcome
 		if out, err = buildReportOutcome(ctx, c, rc); err == nil && rc.Deploy {
 			_, err = deploy(ctx, c)
 		}
 		if err == nil {
 			notifyIssues(ctx, rc, out) // only once the issue is live
+		}
+		if c.Metrics != "" {
+			if merr := writeReportMetrics(c.Metrics, started, out, err); merr != nil {
+				log.Printf("metrics: %v", merr)
+			}
 		}
 	default:
 		usage()

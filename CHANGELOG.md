@@ -2,6 +2,12 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [0.8.2] - 2026-10-28
+
+### Added
+
+- `report -metrics-file`: `birdnet_report_*` textfile metrics (last success time, last run result, duration, issues kept), so a stalled Field Notes build can be alerted on like the snapshot.
+
 ## [0.8.1] - 2026-10-28
 
 ### Fixed

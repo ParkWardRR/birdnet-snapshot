@@ -392,6 +392,8 @@ birdnet_snapshot_uploaded_bytes                   birdnet_snapshot_deleted_files
 birdnet_snapshot_info{version="..."}
 ```
 
+`report -metrics-file` writes `birdnet_report_last_success_timestamp_seconds`, `birdnet_report_last_run_success`, `birdnet_report_last_run_timestamp_seconds`, `birdnet_report_run_duration_seconds`, `birdnet_report_issues` and `birdnet_report_info{version}` the same way. Use a different file from the snapshot's.
+
 ```yaml
 - alert: BirdnetSnapshotStale
   expr: time() - birdnet_snapshot_last_success_timestamp_seconds > 3 * 3600

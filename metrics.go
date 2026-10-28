@@ -91,3 +91,29 @@ func writeTextfile(path, content string) error {
 	}
 	return os.Rename(tmp.Name(), path)
 }
+
+// writeReportMetrics writes the Field Notes run as textfile metrics (atomically,
+// like writeMetrics). The last success time survives failed runs.
+func writeReportMetrics(path string, start time.Time, out *reportOutcome, runErr error) error {
+	lastSuccess := readGauge(path, "birdnet_report_last_success_timestamp_seconds")
+	ok := 0
+	if runErr == nil {
+		ok = 1
+		lastSuccess = float64(time.Now().Unix())
+	}
+	issues := readGauge(path, "birdnet_report_issues")
+	if out != nil && out.store.enabled() {
+		issues = float64(len(out.store.ids()))
+	}
+	var b strings.Builder
+	g := func(name, help string, v float64) {
+		fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s gauge\n%s %s\n", name, help, name, name, strconv.FormatFloat(v, 'f', -1, 64))
+	}
+	fmt.Fprintf(&b, "# HELP birdnet_report_info Build information.\n# TYPE birdnet_report_info gauge\nbirdnet_report_info{version=%q} 1\n", version)
+	g("birdnet_report_last_run_timestamp_seconds", "Unix time the last Field Notes run started.", float64(start.Unix()))
+	g("birdnet_report_last_success_timestamp_seconds", "Unix time of the last Field Notes run that built and published.", lastSuccess)
+	g("birdnet_report_last_run_success", "1 if the last Field Notes run succeeded.", float64(ok))
+	g("birdnet_report_run_duration_seconds", "Duration of the last Field Notes run.", time.Since(start).Seconds())
+	g("birdnet_report_issues", "Weekly issues kept in the archive.", issues)
+	return writeTextfile(path, b.String())
+}
