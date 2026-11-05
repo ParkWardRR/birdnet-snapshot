@@ -22,8 +22,10 @@
 </div>
 
 <style>
-	:global(html),
-	:global(body) {
+	/* Scoped to card mode: this component's CSS ships with the whole report,
+	   so an unscoped :global(body) would paint the paper pages dark too. */
+	:global(html[data-card]),
+	:global(html[data-card] body) {
 		margin: 0;
 		background: #14201a;
 	}

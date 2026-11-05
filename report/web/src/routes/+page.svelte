@@ -124,6 +124,7 @@
 		try {
 			const q = new URLSearchParams(location.search);
 			cardMode = q.has('card');
+			if (cardMode) document.documentElement.dataset.card = '1';
 			const issue = q.get('issue');
 			const wantArchive = q.has('archive');
 			const src = wantArchive
