@@ -221,12 +221,13 @@
 						<span class="ago no-print">· {ago}</span>
 					</p>
 				{/if}
-				<nav class="issues no-print" aria-label="Issues">
+				<nav class="issues no-print" aria-label="This report">
 					{#if report.issue?.prev}<a href="?issue={report.issue.prev}">← Previous</a>{/if}
 					{#if report.issue?.next}<a href="?issue={report.issue.next}">Next →</a>{/if}
 					{#if report.issue}<a href="./">Latest</a>{/if}
 					{#if report.issueCount}<a href="?archive">Past issues ({report.issueCount})</a>{/if}
 					{#if report.feed}<a href="feed.xml">Feed</a>{/if}
+					<a href="https://github.com/tphakala/birdnet-go" rel="noreferrer">BirdNET-Go ↗</a>
 					{#if report.rig}<RigNote rig={report.rig} />{/if}
 				</nav>
 			</div>
