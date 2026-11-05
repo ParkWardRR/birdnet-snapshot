@@ -59,8 +59,21 @@ func severity(f finding) string {
 		return "" // Firefox media cache cancelled a repeat request for a clip it already has
 	case f.Kind == "console error" && strings.Contains(f.Detail, "ServiceWorker intercepted the request") && strings.Contains(f.Detail, "/_snap/") && (strings.Contains(f.Detail, ".flac") || strings.Contains(f.Detail, ".mp3") || strings.Contains(f.Detail, ".wav")):
 		return "" // the same cancellation, as Firefox logs it; playback is checked separately
+	case f.Kind == "page crashed":
+		return "warn" // it loaded on a second visit; -strict still fails on it
 	}
 	return "fail"
+}
+
+// isCrash reports whether err means the browser's page process died, rather
+// than the site failing to answer. Such a page is unusable and has to be
+// replaced before anything else can be checked.
+func isCrash(err error) bool {
+	s := err.Error()
+	return strings.Contains(s, "Page crashed") ||
+		strings.Contains(s, "Target crashed") ||
+		strings.Contains(s, "Target closed") ||
+		strings.Contains(s, "has been closed")
 }
 
 type timing struct {
@@ -175,27 +188,64 @@ func main() {
 					add(finding{b, v, p, fmt.Sprintf("HTTP %d", r.Status()), r.Request().Method() + " " + strings.TrimPrefix(r.URL(), base)})
 				}
 			})
-			page, err := ctx.NewPage()
+			// One page serves every URL in this viewport, so if its process dies
+			// the rest of the run would fail with it. newPage lets a crash be
+			// replaced instead (see the retry below).
+			newPage := func() (playwright.Page, error) {
+				pg, err := ctx.NewPage()
+				if err != nil {
+					return nil, err
+				}
+				pg.On("console", func(m playwright.ConsoleMessage) {
+					if m.Type() == "error" {
+						b, v, p := label()
+						add(finding{b, v, p, "console error", trunc(m.Text(), 300)})
+					}
+				})
+				pg.On("pageerror", func(e error) {
+					b, v, p := label()
+					add(finding{b, v, p, "page error", trunc(e.Error(), 300)})
+				})
+				return pg, nil
+			}
+			page, err := newPage()
 			if err != nil {
 				log.Fatalf("%s page: %v", name, err)
 			}
-			page.On("console", func(m playwright.ConsoleMessage) {
-				if m.Type() == "error" {
-					b, v, p := label()
-					add(finding{b, v, p, "console error", trunc(m.Text(), 300)})
-				}
-			})
-			page.On("pageerror", func(e error) {
-				b, v, p := label()
-				add(finding{b, v, p, "page error", trunc(e.Error(), 300)})
-			})
 
 			for _, p := range pages {
 				cur = p
 				t := timing{Browser: name, Viewport: vp.name, Page: p}
 				for pass := 0; pass < 2; pass++ { // first visit, then a repeat visit
 					start := time.Now()
-					if _, err := page.Goto(base+p, playwright.PageGotoOptions{Timeout: playwright.Float(45000)}); err != nil {
+					_, err := page.Goto(base+p, playwright.PageGotoOptions{Timeout: playwright.Float(45000)})
+					if err != nil && isCrash(err) {
+						// WebKit's web process dies here now and then. Replace the
+						// page and give this visit one more go, so a single crash
+						// neither fails every later page nor passes unnoticed.
+						_ = page.Close()
+						pg, nerr := newPage()
+						if nerr != nil {
+							log.Fatalf("%s page: %v", name, nerr)
+						}
+						page = pg
+						start = time.Now()
+						if _, err2 := page.Goto(base+p, playwright.PageGotoOptions{Timeout: playwright.Float(45000)}); err2 != nil {
+							// Crashed twice on the same page: a real finding. Start
+							// the next page on a fresh one all the same.
+							add(finding{name, vp.name, p, "navigation", err2.Error()})
+							if isCrash(err2) {
+								_ = page.Close()
+								if pg, nerr := newPage(); nerr == nil {
+									page = pg
+								}
+							}
+							break
+						}
+						add(finding{name, vp.name, p, "page crashed", "recovered on a second visit: " + trunc(err.Error(), 160)})
+						err = nil
+					}
+					if err != nil {
 						add(finding{name, vp.name, p, "navigation", err.Error()})
 						break
 					}

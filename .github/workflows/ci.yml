@@ -33,7 +33,7 @@ jobs:
           npm run build
           git diff --exit-code -- ../dist || { echo "report/dist is stale: run npm run build in report/web and commit"; exit 1; }
       - name: go vet
-        run: go vet ./... && (cd tests/browsers && go vet ./...)
+        run: go vet ./... && (cd tests/browsers && go vet ./... && go test -count=1 ./...)
       - name: Unit and end-to-end tests (real Chrome)
         env:
           BNS_E2E_KEEP: ${{ runner.temp }}/e2e-site
