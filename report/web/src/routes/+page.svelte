@@ -17,6 +17,7 @@
 	import WeatherSong from '../lib/components/WeatherSong.svelte';
 	import Soundscape from '../lib/components/Soundscape.svelte';
 	import SpeciesDetail from '../lib/components/SpeciesDetail.svelte';
+	import RigNote from '../lib/components/RigNote.svelte';
 	import ChangeChip from '../lib/components/ChangeChip.svelte';
 	import Archive from '../lib/components/Archive.svelte';
 	import ShareCard from '../lib/components/ShareCard.svelte';
@@ -226,6 +227,7 @@
 					{#if report.issue}<a href="./">Latest</a>{/if}
 					{#if report.issueCount}<a href="?archive">Past issues ({report.issueCount})</a>{/if}
 					{#if report.feed}<a href="feed.xml">Feed</a>{/if}
+					{#if report.rig}<RigNote rig={report.rig} />{/if}
 				</nav>
 			</div>
 

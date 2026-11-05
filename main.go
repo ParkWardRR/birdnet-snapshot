@@ -163,6 +163,8 @@ func parseFlags(cmd string, args []string) (config, string, reportConfig) {
 	fs.StringVar(&rc.Title, "title", env("REPORT_TITLE", "Field Notes"), "report: title [REPORT_TITLE]")
 	fs.StringVar(&rc.Subtitle, "subtitle", env("REPORT_SUBTITLE", "A week of birdsong, as heard by the station"), "report: subtitle [REPORT_SUBTITLE]")
 	fs.StringVar(&rc.Station, "station", env("REPORT_STATION", "A backyard listening station"), "report: station name shown on the cover; keep it vague [REPORT_STATION]")
+	fs.StringVar(&rc.Rig, "rig", env("REPORT_RIG", ""), "report: hardware note for the cover; first line is the lead sentence, later \"Label: value\" lines are rows (empty = no note). Nothing is read from the host, so keep hostnames and addresses out of it [REPORT_RIG]")
+	fs.StringVar(&rc.RigTitle, "rig-title", env("REPORT_RIG_TITLE", "Run at home"), "report: label on the button that opens the hardware note [REPORT_RIG_TITLE]")
 	fs.BoolVar(&rc.PDF, "pdf", envBool("REPORT_PDF", true), "report: also print the report to a PDF [REPORT_PDF]")
 	fs.BoolVar(&rc.Photos, "photos", envBool("REPORT_PHOTOS", true), "report: fetch large species photos from Avicommons (else BirdNET-Go's small ones) [REPORT_PHOTOS]")
 	fs.IntVar(&rc.Clips, "clips", envInt("REPORT_CLIPS", 3), "report: publish this many best and this many most recent recordings, one per species (0 = none; -skip-audio and -no-audio apply) [REPORT_CLIPS]")

@@ -459,3 +459,35 @@ func TestBuildReportDawn(t *testing.T) {
 		t.Errorf("dawn charted from one day: %+v", d2r.Dawn)
 	}
 }
+
+func TestParseRig(t *testing.T) {
+	if got := parseRig("", "  \n\n "); got != nil {
+		t.Fatalf("blank text should leave the note off, got %+v", got)
+	}
+	got := parseRig("", "Runs at home.\nCPU: i5-8600T, 6 cores\n\nGPU:  Quadro P1000 \nno colon here")
+	if got == nil {
+		t.Fatal("want a rig")
+	}
+	if got.Title != "Run at home" {
+		t.Errorf("title = %q, want the default", got.Title)
+	}
+	if got.Lead != "Runs at home." {
+		t.Errorf("lead = %q", got.Lead)
+	}
+	want := []reportSpec{
+		{Label: "CPU", Value: "i5-8600T, 6 cores"},
+		{Label: "GPU", Value: "Quadro P1000"},
+		{Value: "no colon here"},
+	}
+	if !slices.Equal(got.Specs, want) {
+		t.Errorf("specs = %+v, want %+v", got.Specs, want)
+	}
+	if got := parseRig("The machine", "Lead"); got.Title != "The machine" {
+		t.Errorf("title = %q, want the override", got.Title)
+	}
+	// A systemd EnvironmentFile cannot hold a real newline.
+	esc := parseRig("", `Runs at home.\nCPU: i5-8600T`)
+	if esc.Lead != "Runs at home." || !slices.Equal(esc.Specs, []reportSpec{{Label: "CPU", Value: "i5-8600T"}}) {
+		t.Errorf(`literal \n not split: %+v`, esc)
+	}
+}

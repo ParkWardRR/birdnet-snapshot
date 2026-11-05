@@ -49,6 +49,55 @@ type reportData struct {
 	Growth      *reportGrowth     `json:"growth,omitempty"`
 	Weather     *reportWeather    `json:"weather,omitempty"`
 	Soundscape  *reportSoundscape `json:"soundscape,omitempty"`
+	Rig         *reportRig        `json:"rig,omitempty"` // the machine the station runs on
+}
+
+// reportRig describes the hardware behind the station, for the cover's note.
+// It is whatever the operator puts in -rig; nothing is read from the host, so
+// no hostname or address reaches the page unless they write one.
+type reportRig struct {
+	Title string       `json:"title"`
+	Lead  string       `json:"lead,omitempty"`
+	Specs []reportSpec `json:"specs,omitempty"`
+}
+
+type reportSpec struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+}
+
+// parseRig reads the -rig text. The first non-empty line is the lead sentence;
+// every later non-empty line is a "Label: value" row (a line with no colon
+// becomes a row with no label). Blank input means no hardware note at all.
+// A literal \n counts as a line break too, because a systemd EnvironmentFile
+// cannot hold a real one.
+func parseRig(title, text string) *reportRig {
+	var lead string
+	var specs []reportSpec
+	text = strings.ReplaceAll(text, `\n`, "\n")
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if lead == "" {
+			lead = line
+			continue
+		}
+		label, value, ok := strings.Cut(line, ":")
+		if !ok {
+			specs = append(specs, reportSpec{Value: line})
+			continue
+		}
+		specs = append(specs, reportSpec{Label: strings.TrimSpace(label), Value: strings.TrimSpace(value)})
+	}
+	if lead == "" && len(specs) == 0 {
+		return nil
+	}
+	if title = strings.TrimSpace(title); title == "" {
+		title = "Run at home"
+	}
+	return &reportRig{Title: title, Lead: lead, Specs: specs}
 }
 
 type reportPeriod struct {
@@ -115,6 +164,8 @@ type reportConfig struct {
 	Title        string
 	Subtitle     string
 	Station      string
+	Rig          string // hardware note shown on the cover (see parseRig); "" leaves it off
+	RigTitle     string
 	Days         int
 	PDF          bool
 	Deploy       bool
@@ -319,6 +370,7 @@ func collectReport(ctx context.Context, c config, rc reportConfig, loc *time.Loc
 	d := &reportData{
 		Version: version, GeneratedAt: now.Truncate(time.Second),
 		Title: rc.Title, Subtitle: rc.Subtitle, Station: rc.Station,
+		Rig:    parseRig(rc.RigTitle, rc.Rig),
 		Period: reportPeriod{Start: first.Format("2006-01-02"), End: end.Format("2006-01-02"), Days: days, Label: periodLabel(first, end)},
 		Hourly: make([]int, 24),
 	}

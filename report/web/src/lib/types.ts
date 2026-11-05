@@ -79,6 +79,14 @@ export interface Report {
 	issue?: IssueRef;
 	issueCount?: number;
 	feed?: boolean;
+	rig?: Rig;
+}
+
+/** The machine the station runs on, shown in a note on the cover. */
+export interface Rig {
+	title: string;
+	lead?: string;
+	specs?: { label?: string; value: string }[];
 }
 
 /** One morning singer's dawn-chorus onset, a point per day of the period. */
